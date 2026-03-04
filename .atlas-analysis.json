@@ -1,0 +1,119 @@
+{
+  "projectType": "api-service",
+  "projectName": "Secure Link API",
+  "projectDescription": "API backend for creating and managing secure links with expiration control, access limits, and password protection.",
+  "theme": "sequoia",
+  "primaryColor": "#7c7c80",
+  "lightColor": "#151c28",
+  "darkColor": "#f2f2f2",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/secure-links",
+              "concepts/access-control",
+              "concepts/audit-tracking"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/creating-links",
+              "guides/uploading-files",
+              "guides/password-protection",
+              "guides/link-expiration",
+              "guides/revocation"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication",
+              "api/error-handling"
+            ]
+          },
+          {
+            "group": "Links",
+            "pages": [
+              "api/links/create",
+              "api/links/upload",
+              "api/links/resolve",
+              "api/links/revoke"
+            ]
+          },
+          {
+            "group": "Statistics",
+            "pages": [
+              "api/stats/overview",
+              "api/stats/access-summary",
+              "api/stats/security-metrics"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Operations",
+        "groups": [
+          {
+            "group": "Deployment",
+            "pages": [
+              "operations/installation",
+              "operations/configuration",
+              "operations/docker"
+            ]
+          },
+          {
+            "group": "Monitoring",
+            "pages": [
+              "operations/health-checks",
+              "operations/metrics",
+              "operations/observability"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Create secure short links with expiration control",
+    "Upload files and generate download links",
+    "Password protection for links",
+    "Maximum view limit enforcement",
+    "Manual link revocation",
+    "Comprehensive access audit trail",
+    "Real-time statistics and metrics",
+    "Prometheus integration for monitoring"
+  ],
+  "publicApiSurface": [
+    "POST /api/links - Create link for external URL",
+    "POST /api/links/upload - Upload file and create link",
+    "GET /l/{shortCode} - Resolve and access link",
+    "DELETE /l/{shortCode} - Revoke link",
+    "GET /api/stats/access/summary - Access summary statistics",
+    "GET /api/stats/access/hourly - Hourly access distribution",
+    "GET /api/stats/access/daily - Daily access counts",
+    "GET /api/stats/access/failures - Failure distribution by type",
+    "GET /api/stats/security/exceptions - Security exception hotspots",
+    "GET /api/stats/links - Link status statistics",
+    "GET /api/stats/links/top - Most accessed links",
+    "GET /actuator/health - Health check endpoint",
+    "GET /actuator/prometheus - Prometheus metrics"
+  ]
+}
