@@ -1,0 +1,375 @@
+---
+title: "Link Expiration"
+description: "Learn how to configure expiration and time-to-live (TTL) for secure links"
+---
+
+## Overview
+
+Link expiration allows you to control how long links remain accessible. The Secure Link API supports two types of expiration: time-based (using `expiresAt`) and usage-based (using `maxViews`).
+
+## Time-Based Expiration
+
+Set a specific date and time when the link should expire using the `expiresAt` parameter.
+
+### Creating Links with Expiration
+
+<Tabs>
+  <Tab title="URL Links">
+    ```bash
+    curl -X POST http://localhost:8080/api/links \
+      -H "Content-Type: application/json" \
+      -d '{
+        "targetUrl": "https://example.com/promotion",
+        "expiresAt": "2026-12-31T23:59:59+00:00"
+      }'
+    ```
+
+    Response:
+    ```json
+    {
+      "shortCode": "abc123",
+      "accessUrl": "http://localhost:8080/l/abc123",
+      "expiresAt": "2026-12-31T23:59:59Z",
+      "maxViews": null
+    }
+    ```
+  </Tab>
+
+  <Tab title="File Uploads">
+    ```bash
+    curl -X POST http://localhost:8080/api/links/upload \
+      -F "file=@temporary-document.pdf" \
+      -F "expiresAt=2026-03-10T00:00:00+00:00"
+    ```
+
+    Response:
+    ```json
+    {
+      "shortCode": "xyz789",
+      "accessUrl": "http://localhost:8080/l/xyz789",
+      "expiresAt": "2026-03-10T00:00:00Z",
+      "maxViews": null
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Date Format Requirements
+
+The `expiresAt` parameter accepts ISO 8601 format with timezone offset:
+
+```
+YYYY-MM-DDTHH:mm:ss+00:00
+```
+
+<Note>
+  Always include the timezone offset (e.g., `+00:00` for UTC, `+05:30` for IST). This ensures consistent expiration regardless of server timezone.
+</Note>
+
+#### Valid Examples
+
+```bash
+# UTC timezone
+"expiresAt": "2026-12-31T23:59:59+00:00"
+
+# Eastern Standard Time (EST)
+"expiresAt": "2026-12-31T18:59:59-05:00"
+
+# Indian Standard Time (IST)
+"expiresAt": "2027-01-01T05:29:59+05:30"
+
+# Shortened ISO format (Z for UTC)
+"expiresAt": "2026-12-31T23:59:59Z"
+```
+
+#### Invalid Examples
+
+```bash
+# Missing timezone (will be rejected)
+"expiresAt": "2026-12-31T23:59:59"
+
+# Past date (validation error)
+"expiresAt": "2020-01-01T00:00:00Z"
+
+# Invalid format
+"expiresAt": "31-12-2026 23:59:59"
+```
+
+<Warning>
+  The `expiresAt` value must be in the future. The API validates this using the `@Future` annotation and will return a 400 Bad Request for past dates.
+</Warning>
+
+## Usage-Based Expiration
+
+Limit how many times a link can be accessed using the `maxViews` parameter.
+
+### Creating Links with View Limits
+
+```bash
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetUrl": "https://example.com/limited-access",
+    "maxViews": 10
+  }'
+```
+
+Response:
+```json
+{
+  "shortCode": "abc123",
+  "accessUrl": "http://localhost:8080/l/abc123",
+  "expiresAt": null,
+  "maxViews": 10
+}
+```
+
+### View Count Behavior
+
+Each successful access increments the view count:
+
+<Steps>
+  <Step title="First access">
+    View count: 1/10 - Access granted
+  </Step>
+
+  <Step title="Subsequent accesses">
+    View count: 2/10, 3/10, ... 9/10 - Access granted
+  </Step>
+
+  <Step title="Limit reached">
+    View count: 10/10 - Access granted
+  </Step>
+
+  <Step title="Exceeded limit">
+    View count: 10/10 - Link automatically expires, access denied
+  </Step>
+</Steps>
+
+<Note>
+  When `maxViews` is reached, the link is automatically marked as expired. Future access attempts will receive a 410 Gone response.
+</Note>
+
+### View Count Implementation
+
+From the source code (ResolveLinkServiceImpl:78-82):
+
+```java
+if (link.hasReachedViewLimit()) {
+  link.expire();
+  repository.save(link);
+  handleDenied(link.getShortCode(), AccessResult.VIEW_LIMIT_REACHED, 
+    "view_limit_reached", context);
+}
+```
+
+Failed access attempts (wrong password, etc.) do NOT increment the view count. Only successful accesses count toward the limit.
+
+## Combining Expiration Methods
+
+You can use both time-based and usage-based expiration together:
+
+```bash
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetUrl": "https://example.com/event-ticket",
+    "expiresAt": "2026-06-30T23:59:59+00:00",
+    "maxViews": 100
+  }'
+```
+
+The link will expire when **either** condition is met:
+- The date reaches June 30, 2026 at 23:59:59 UTC, OR
+- The link is accessed 100 times
+
+Whichever happens first will trigger expiration.
+
+## Expiration Validation
+
+The API performs several checks when accessing a link:
+
+### Validation Order
+
+From ResolveLinkServiceImpl:71-85, checks occur in this order:
+
+1. **Revocation check** - Has the link been manually revoked?
+2. **Time expiration check** - Has `expiresAt` passed?
+3. **View limit check** - Has `maxViews` been reached?
+4. **Active status check** - Is the link still active?
+5. **Password check** - Does the password match (if protected)?
+
+### Expired Link Response
+
+When accessing an expired link:
+
+```bash
+curl -L http://localhost:8080/l/abc123
+```
+
+Response (410 Gone):
+```json
+{
+  "timestamp": "2026-03-04T14:30:00Z",
+  "status": 410,
+  "error": "Gone",
+  "message": "Link access denied",
+  "path": "/l/abc123"
+}
+```
+
+### View Limit Reached Response
+
+When the view limit has been exceeded:
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00Z",
+  "status": 410,
+  "error": "Gone",
+  "message": "Link access denied",
+  "path": "/l/abc123"
+}
+```
+
+<Note>
+  Both time expiration and view limit expiration return the same 410 Gone status. Check audit logs for specific expiration reasons.
+</Note>
+
+## Common Expiration Patterns
+
+### Short-Term Sharing (24 hours)
+
+```bash
+curl -X POST http://localhost:8080/api/links/upload \
+  -F "file=@meeting-notes.pdf" \
+  -F "expiresAt=2026-03-05T14:30:00Z"
+```
+
+Use case: Share meeting notes that should only be accessible for 24 hours.
+
+### Campaign Links (end date)
+
+```bash
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetUrl": "https://example.com/black-friday-sale",
+    "expiresAt": "2026-11-30T23:59:59Z"
+  }'
+```
+
+Use case: Marketing campaign that ends on a specific date.
+
+### Limited Distribution (view count)
+
+```bash
+curl -X POST http://localhost:8080/api/links/upload \
+  -F "file=@beta-software.zip" \
+  -F "maxViews=50"
+```
+
+Use case: Beta software download limited to first 50 users.
+
+### Exclusive Access (both limits)
+
+```bash
+curl -X POST http://localhost:8080/api/links/upload \
+  -F "file=@exclusive-content.pdf" \
+  -F "expiresAt=2026-12-31T23:59:59Z" \
+  -F "maxViews=10" \
+  -F "password=VIP2026"
+```
+
+Use case: VIP content with password, limited views, and expiration date.
+
+## Automatic Expiration Process
+
+The API includes a scheduled expiration service that automatically marks expired links:
+
+- Runs periodically (configured via cron expression)
+- Finds all links where `expiresAt < currentTime`
+- Marks them as expired in the database
+- Prevents access to expired links
+
+<Warning>
+  Even if the automatic expiration process hasn't run yet, the API will still reject access to links past their `expiresAt` time during the validation check.
+</Warning>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Set reasonable expiration times" icon="clock">
+    Consider your use case:
+    - **Temporary shares**: 1-7 days
+    - **Event-based**: End date of the event
+    - **Sensitive data**: Shortest possible duration
+    - **General content**: 30-90 days
+  </Accordion>
+
+  <Accordion title="Always set expiration for uploads" icon="calendar">
+    File uploads consume storage. Always set an `expiresAt` date to prevent indefinite storage consumption.
+  </Accordion>
+
+  <Accordion title="Use maxViews for distribution control" icon="eye">
+    When you need to limit how widely content is shared, use `maxViews` rather than relying solely on time expiration.
+  </Accordion>
+
+  <Accordion title="Combine with password protection" icon="lock">
+    For sensitive content, use expiration AND password protection for defense in depth.
+  </Accordion>
+
+  <Accordion title="Monitor expiration patterns" icon="chart-line">
+    Track how often links expire due to time vs. view limits to optimize your expiration strategy.
+  </Accordion>
+
+  <Accordion title="Communicate expiration to users" icon="bell">
+    Let users know when links will expire so they can plan accordingly.
+  </Accordion>
+</AccordionGroup>
+
+## Validation Errors
+
+### Future Date Validation
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "expiresAt: must be a future date",
+  "path": "/api/links"
+}
+```
+
+### Positive Integer Validation
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "maxViews: must be greater than 0",
+  "path": "/api/links"
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Revocation" icon="ban" href="/guides/revocation">
+    Manually revoke links before they expire
+  </Card>
+
+  <Card title="Password Protection" icon="lock" href="/guides/password-protection">
+    Add password protection to expiring links
+  </Card>
+
+  <Card title="Creating Links" icon="link" href="/guides/creating-links">
+    Learn all link creation options
+  </Card>
+
+  <Card title="Access Summary" icon="chart-bar" href="/api/stats/access-summary">
+    Monitor link access and expiration patterns
+  </Card>
+</CardGroup>

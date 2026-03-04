@@ -1,0 +1,212 @@
+---
+title: 'Security & Link Metrics'
+description: 'Monitor security exceptions and track link status statistics'
+---
+
+## Get Security Exceptions
+
+<ParamField path="GET" type="endpoint">
+  /api/stats/security/exceptions
+</ParamField>
+
+Get the links with the most security violations or failed access attempts. Useful for identifying potentially problematic or heavily targeted links.
+
+### Query Parameters
+
+<ParamField query="limit" type="int" default="5">
+  Maximum number of results to return
+</ParamField>
+
+### Response
+
+Returns an array of security exception records ordered by count (highest first):
+
+<ResponseField name="shortCode" type="string" required>
+  The short code of the link with security exceptions
+</ResponseField>
+
+<ResponseField name="count" type="long" required>
+  Number of security exceptions for this link
+</ResponseField>
+
+<ResponseExample>
+```json
+[
+  {
+    "shortCode": "abc123",
+    "count": 47
+  },
+  {
+    "shortCode": "xyz789",
+    "count": 32
+  },
+  {
+    "shortCode": "def456",
+    "count": 28
+  },
+  {
+    "shortCode": "ghi789",
+    "count": 19
+  },
+  {
+    "shortCode": "jkl012",
+    "count": 12
+  }
+]
+```
+</ResponseExample>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.securelink.com/api/stats/security/exceptions?limit=10" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+---
+
+## Get Link Status Statistics
+
+<ParamField path="GET" type="endpoint">
+  /api/stats/links
+</ParamField>
+
+Get counts of links grouped by their current status. Provides an overview of your link inventory.
+
+### Response
+
+<ResponseField name="active" type="long" required>
+  Number of currently active links
+</ResponseField>
+
+<ResponseField name="expired" type="long" required>
+  Number of expired links
+</ResponseField>
+
+<ResponseField name="revoked" type="long" required>
+  Number of revoked links
+</ResponseField>
+
+<ResponseExample>
+```json
+{
+  "active": 342,
+  "expired": 156,
+  "revoked": 23
+}
+```
+</ResponseExample>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.securelink.com/api/stats/links" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+---
+
+## Get Top Links
+
+<ParamField path="GET" type="endpoint">
+  /api/stats/links/top
+</ParamField>
+
+Get the most accessed links ordered by access count. Identify your most popular content.
+
+### Query Parameters
+
+<ParamField query="limit" type="int" default="5">
+  Maximum number of results to return
+</ParamField>
+
+### Response
+
+Returns an array of top link records ordered by access count (highest first):
+
+<ResponseField name="shortCode" type="string" required>
+  The short code of the link
+</ResponseField>
+
+<ResponseField name="accessCount" type="long" required>
+  Total number of accesses for this link
+</ResponseField>
+
+<ResponseExample>
+```json
+[
+  {
+    "shortCode": "popular1",
+    "accessCount": 1523
+  },
+  {
+    "shortCode": "trending2",
+    "accessCount": 1247
+  },
+  {
+    "shortCode": "viral3",
+    "accessCount": 982
+  },
+  {
+    "shortCode": "shared4",
+    "accessCount": 756
+  },
+  {
+    "shortCode": "common5",
+    "accessCount": 634
+  }
+]
+```
+</ResponseExample>
+
+### Example Request
+
+```bash
+curl -X GET "https://api.securelink.com/api/stats/links/top?limit=20" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+## Use Cases
+
+### Identify Popular Content
+
+Use the top links endpoint to understand which content resonates most with your audience:
+
+```javascript
+const topLinks = await fetch('/api/stats/links/top?limit=10')
+  .then(res => res.json());
+
+// Analyze patterns in popular links
+topLinks.forEach(link => {
+  console.log(`${link.shortCode}: ${link.accessCount} accesses`);
+});
+```
+
+### Security Monitoring Dashboard
+
+Combine security exceptions with failure data to monitor potential attacks:
+
+```javascript
+const [exceptions, failures] = await Promise.all([
+  fetch('/api/stats/security/exceptions?limit=10'),
+  fetch('/api/stats/access/failures')
+]);
+
+// Alert if any link has excessive security exceptions
+const securityThreshold = 50;
+const problematicLinks = exceptions.filter(e => e.count > securityThreshold);
+```
+
+### Link Lifecycle Analysis
+
+Monitor the health of your link inventory:
+
+```javascript
+const linkStats = await fetch('/api/stats/links')
+  .then(res => res.json());
+
+const total = linkStats.active + linkStats.expired + linkStats.revoked;
+const activePercentage = (linkStats.active / total) * 100;
+
+console.log(`Active links: ${activePercentage.toFixed(2)}%`);
+```

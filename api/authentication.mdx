@@ -1,0 +1,134 @@
+---
+title: Authentication
+description: Authentication mechanisms for the Secure Link API
+---
+
+## Overview
+
+The Secure Link API does not require authentication for most endpoints. However, individual links can be password-protected to restrict access.
+
+<Note>
+  There is no API-level authentication (no API keys or OAuth). Link-level password protection is optional and controlled per link.
+</Note>
+
+## Link Password Protection
+
+When creating a link, you can optionally set a password to restrict access. Users attempting to resolve the link must provide the correct password.
+
+### Setting a Password
+
+Include the `password` field when creating a link:
+
+**POST /api/links**
+```json
+{
+  "targetUrl": "https://example.com",
+  "expiresAt": "2026-12-31T23:59:59Z",
+  "password": "mySecurePassword123"
+}
+```
+
+**POST /api/links/upload**
+```bash
+curl -X POST http://localhost:8080/api/links/upload \
+  -F "file=@document.pdf" \
+  -F "password=mySecurePassword123"
+```
+
+### Password Storage
+
+Passwords are securely hashed using Spring Security's `PasswordEncoder` before being stored in the database. The API never stores passwords in plaintext.
+
+<Warning>
+  Passwords cannot be recovered. If a user forgets the password, the link must be revoked and recreated.
+</Warning>
+
+## Accessing Password-Protected Links
+
+To access a password-protected link, provide the password via the `X-Link-Password` HTTP header.
+
+### Request Example
+
+```bash
+curl -X GET http://localhost:8080/l/abc123xyz \
+  -H "X-Link-Password: mySecurePassword123"
+```
+
+### Header Details
+
+<ResponseField name="X-Link-Password" type="string">
+  The password for the protected link. Required only if the link was created with a password.
+</ResponseField>
+
+## Error Responses
+
+### Missing Password
+
+If a link requires a password but none is provided:
+
+**HTTP 401 Unauthorized**
+```json
+{
+  "timestamp": "2026-03-04T10:30:45.123Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Password required",
+  "path": "/l/abc123xyz"
+}
+```
+
+### Invalid Password
+
+If the provided password is incorrect:
+
+**HTTP 401 Unauthorized**
+```json
+{
+  "timestamp": "2026-03-04T10:30:45.123Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Invalid password",
+  "path": "/l/abc123xyz"
+}
+```
+
+## Security Best Practices
+
+1. **Use HTTPS in Production**: Always use HTTPS to prevent password interception
+2. **Strong Passwords**: Use strong, unique passwords for sensitive links
+3. **Combine with Expiration**: Set both password protection and time-based expiration for maximum security
+4. **Limit Views**: Consider setting `maxViews` to limit how many times a link can be accessed
+
+<Note>
+  The password is validated in the service layer (ResolveLinkServiceImpl:87-94) using Spring Security's password encoder.
+</Note>
+
+## Implementation Details
+
+### Controller
+
+The `X-Link-Password` header is extracted in the `ResolveLinkController`:
+
+```java
+@GetMapping("/l/{shortCode}")
+public ResponseEntity<?> resolve(
+    @PathVariable String shortCode,
+    @RequestHeader(value = "X-Link-Password", required = false) String password,
+    // ...
+) {
+  // ...
+}
+```
+
+**Reference**: ResolveLinkController:30-35
+
+### Validation Logic
+
+Password validation occurs in the resolve flow:
+
+1. Check if link is password-protected
+2. If yes, verify password is provided (401 if missing)
+3. Verify password matches hash (401 if invalid)
+4. Proceed with link resolution if valid
+
+**Reference**: ResolveLinkServiceImpl:87-94

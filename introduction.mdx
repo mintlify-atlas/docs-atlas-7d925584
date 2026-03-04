@@ -1,0 +1,205 @@
+---
+title: Welcome to Secure Link API
+description: Create and manage secure, expiring links with password protection and comprehensive access controls
+mode: custom
+---
+
+<div className="relative overflow-hidden bg-gradient-to-br from-[#151c28] via-[#1a2332] to-[#151c28] dark:from-[#0f1117] dark:via-[#151820] dark:to-[#0f1117] py-20">
+  <div className="max-w-6xl mx-auto px-6 lg:px-8">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+      <div className="lg:col-span-7">
+        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white mb-6">
+          Secure Link API
+        </h1>
+        <p className="text-lg sm:text-xl text-gray-300 dark:text-gray-400 max-w-2xl mb-8">
+          Generate secure, expiring links with password protection, access limits, and comprehensive audit trails. Built with Java and Spring Boot for production-ready link management.
+        </p>
+        <div className="flex flex-wrap gap-4">
+          <a
+            href="/quickstart"
+            className="inline-flex items-center justify-center px-6 py-3 rounded-lg bg-[#7c7c80] hover:bg-[#6a6a6e] text-white font-semibold transition-colors"
+          >
+            Get Started
+          </a>
+          <a
+            href="/api/overview"
+            className="inline-flex items-center justify-center px-6 py-3 rounded-lg border border-white/30 bg-white/10 hover:bg-white/20 text-white font-semibold transition-colors"
+          >
+            API Reference
+          </a>
+        </div>
+      </div>
+      <div className="lg:col-span-5 flex justify-center lg:justify-end">
+        <div className="relative w-full max-w-md">
+          <div className="absolute inset-0 bg-gradient-to-r from-[#7c7c80]/20 to-transparent blur-3xl"></div>
+          <div className="relative bg-[#1a2332]/80 dark:bg-[#1a1d27]/80 border border-[#27272a] dark:border-[#27272a] rounded-2xl p-6 backdrop-blur-sm">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-3 h-3 rounded-full bg-red-500"></div>
+              <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+              <div className="w-3 h-3 rounded-full bg-green-500"></div>
+            </div>
+            <pre className="text-sm text-gray-300 dark:text-gray-400 overflow-x-auto">
+              <code>{`POST /api/links
+{
+  "targetUrl": "https://example.com",
+  "expiresAt": "2026-12-31T23:59:59Z",
+  "maxViews": 10,
+  "password": "secure"
+}
+
+→ {
+  "shortCode": "abc12345",
+  "accessUrl": "/l/abc12345",
+  "expiresAt": "2026-12-31T23:59:59Z"
+}`}</code>
+            </pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-3">
+    Key Features
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Everything you need to create, manage, and monitor secure links
+  </p>
+  
+  <CardGroup cols={3}>
+    <Card title="Expiration Control" icon="clock" href="/concepts/secure-links">
+      Set precise expiration dates or automatic TTL for time-sensitive content
+    </Card>
+    <Card title="Access Limits" icon="shield-check" href="/concepts/access-control">
+      Define maximum view counts to control how many times a link can be accessed
+    </Card>
+    <Card title="Password Protection" icon="lock" href="/guides/password-protection">
+      Secure links with password authentication via HTTP headers
+    </Card>
+    <Card title="File Uploads" icon="upload" href="/guides/uploading-files">
+      Upload files and generate secure download links with access controls
+    </Card>
+    <Card title="Audit Trail" icon="list-check" href="/concepts/audit-tracking">
+      Track every access attempt with origin, user agent, and result status
+    </Card>
+    <Card title="Real-time Stats" icon="chart-line" href="/api/stats/overview">
+      Monitor access patterns, security exceptions, and link performance
+    </Card>
+  </CardGroup>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-3">
+    Quick Start
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Get up and running with the Secure Link API in minutes
+  </p>
+  
+  <Steps>
+    <Step title="Start the API server">
+      Clone the repository and start the Spring Boot application with your preferred profile:
+      
+      ```bash
+      git clone https://github.com/WalysonGomes/secure-link-api.git
+      cd secure-link-api/backend
+      SPRING_PROFILES_ACTIVE=dev mvn spring-boot:run
+      ```
+      
+      The API will be available at `http://localhost:8080`
+    </Step>
+    
+    <Step title="Create your first secure link">
+      Send a POST request to create a link with expiration and access controls:
+      
+      ```bash
+      curl -X POST http://localhost:8080/api/links \
+        -H "Content-Type: application/json" \
+        -d '{
+          "targetUrl": "https://example.com/document.pdf",
+          "expiresAt": "2026-12-31T23:59:59Z",
+          "maxViews": 5,
+          "password": "secret123"
+        }'
+      ```
+      
+      <Accordion title="Example Response">
+      ```json
+      {
+        "shortCode": "K2x9pLmN",
+        "accessUrl": "http://localhost:8080/l/K2x9pLmN",
+        "expiresAt": "2026-12-31T23:59:59Z",
+        "maxViews": 5
+      }
+      ```
+      </Accordion>
+    </Step>
+    
+    <Step title="Access the secure link">
+      Use the short code to access the link, providing the password in the header:
+      
+      ```bash
+      curl -i http://localhost:8080/l/K2x9pLmN \
+        -H "X-Link-Password: secret123"
+      ```
+      
+      The API validates the link status, checks the password, and redirects to the target URL if all conditions are met.
+    </Step>
+    
+    <Step title="Monitor access statistics">
+      Check access patterns and security metrics:
+      
+      ```bash
+      curl http://localhost:8080/api/stats/access/summary
+      ```
+      
+      View detailed statistics on successful accesses, failures, security exceptions, and more.
+    </Step>
+  </Steps>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-3">
+    Explore the Documentation
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Dive deeper into core concepts, guides, and API reference
+  </p>
+  
+  <CardGroup cols={2}>
+    <Card title="Core Concepts" icon="book-open" href="/concepts/secure-links">
+      Understand how secure links work, validation rules, and the link lifecycle
+    </Card>
+    <Card title="API Reference" icon="code" href="/api/overview">
+      Complete API documentation with endpoints, parameters, and response schemas
+    </Card>
+    <Card title="Deployment Guide" icon="server" href="/operations/installation">
+      Deploy the API with Docker, configure environments, and set up monitoring
+    </Card>
+    <Card title="Monitoring & Metrics" icon="chart-bar" href="/operations/metrics">
+      Set up Prometheus metrics, health checks, and observability tools
+    </Card>
+  </CardGroup>
+</div>
+
+<div className="mt-20 mb-16 max-w-5xl mx-auto px-6">
+  <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#151c28] to-[#1a2332] dark:from-[#1a1d27] dark:to-[#242838] border border-[#27272a] dark:border-[#27272a] p-8 lg:p-12">
+    <div className="relative z-10">
+      <h2 className="text-2xl sm:text-3xl font-bold text-white mb-4">
+        Ready to get started?
+      </h2>
+      <p className="text-lg text-gray-300 dark:text-gray-400 max-w-2xl mb-6">
+        Jump into the quickstart guide or explore the full API reference to start building secure link management into your application.
+      </p>
+      <a
+        href="/quickstart"
+        className="inline-flex items-center justify-center px-6 py-3 rounded-lg bg-[#7c7c80] hover:bg-[#6a6a6e] text-white font-semibold transition-colors"
+      >
+        Get Started Now
+      </a>
+    </div>
+    <div className="absolute inset-0 bg-gradient-to-r from-[#7c7c80]/10 to-transparent"></div>
+  </div>
+</div>

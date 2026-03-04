@@ -1,0 +1,447 @@
+---
+title: 'Metrics & Monitoring'
+description: 'Prometheus metrics, Micrometer integration, and custom business metrics for observability'
+---
+
+## Overview
+
+Secure Link API exposes comprehensive metrics through Prometheus and Micrometer. The application tracks both technical metrics (JVM, HTTP requests) and business metrics (link operations, access patterns).
+
+## Prometheus Endpoint
+
+Metrics are exposed in Prometheus format:
+
+```
+GET /actuator/prometheus
+```
+
+This endpoint returns metrics in Prometheus text format, ready to be scraped by a Prometheus server.
+
+### Example Output
+
+```prometheus
+# HELP secure_link_created_total Total number of secure links created
+# TYPE secure_link_created_total counter
+secure_link_created_total{type="REDIRECT"} 245.0
+secure_link_created_total{type="DOWNLOAD"} 132.0
+
+# HELP secure_link_resolve_attempts_total Total link resolution attempts
+# TYPE secure_link_resolve_attempts_total counter
+secure_link_resolve_attempts_total 1523.0
+
+# HELP secure_link_resolve_success_total Successful link resolutions
+# TYPE secure_link_resolve_success_total counter
+secure_link_resolve_success_total 1384.0
+
+# HELP secure_link_resolve_denied_total Denied link resolution attempts
+# TYPE secure_link_resolve_denied_total counter
+secure_link_resolve_denied_total{reason="not_found"} 87.0
+secure_link_resolve_denied_total{reason="expired"} 34.0
+secure_link_resolve_denied_total{reason="revoked"} 12.0
+secure_link_resolve_denied_total{reason="view_limit_reached"} 6.0
+
+# HELP secure_link_resolve_duration_seconds Time spent resolving links
+# TYPE secure_link_resolve_duration_seconds summary
+secure_link_resolve_duration_seconds_count 1523.0
+secure_link_resolve_duration_seconds_sum 12.456
+```
+
+## Micrometer Integration
+
+The application uses Micrometer for metrics collection, with Prometheus as the export format.
+
+### Dependencies
+
+```xml
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-actuator</artifactId>
+</dependency>
+<dependency>
+  <groupId>io.micrometer</groupId>
+  <artifactId>micrometer-registry-prometheus</artifactId>
+</dependency>
+```
+
+### Metric Types
+
+Micrometer supports several metric types used throughout the application:
+
+- **Counter** - Monotonically increasing values (link creations, access attempts)
+- **Timer** - Duration and rate of events (link resolution time)
+- **Gauge** - Current value that can go up or down (active sessions)
+
+## Custom Business Metrics
+
+### Link Creation Metrics
+
+Tracks secure link creation operations.
+
+**Implementation:** `br.com.walyson.secure_link.service.impl.CreateLinkServiceImpl:53`
+
+```java
+meterRegistry.counter("secure_link_created_total", "type", "REDIRECT").increment();
+```
+
+**Metric:** `secure_link_created_total`  
+**Type:** Counter  
+**Tags:**
+- `type` - Link type: `REDIRECT` or `DOWNLOAD`
+
+**Usage:**
+```promql
+# Total links created
+sum(secure_link_created_total)
+
+# Links created by type
+sum by (type) (secure_link_created_total)
+
+# Creation rate (per second)
+rate(secure_link_created_total[5m])
+```
+
+---
+
+### Link Resolution Metrics
+
+Tracks link access attempts and outcomes.
+
+**Implementation:** `br.com.walyson.secure_link.service.impl.ResolveLinkServiceImpl:53`
+
+#### Attempts Counter
+
+```java
+Counter.builder("secure_link_resolve_attempts_total")
+  .register(meterRegistry)
+  .increment();
+```
+
+**Metric:** `secure_link_resolve_attempts_total`  
+**Type:** Counter  
+**Description:** Total number of link resolution attempts (successful and failed)
+
+#### Success Counter
+
+```java
+Counter.builder("secure_link_resolve_success_total")
+  .register(meterRegistry)
+  .increment();
+```
+
+**Metric:** `secure_link_resolve_success_total`  
+**Type:** Counter  
+**Description:** Successfully resolved link accesses
+
+#### Denied Counter
+
+```java
+meterRegistry.counter("secure_link_resolve_denied_total", "reason", reason)
+  .increment();
+```
+
+**Metric:** `secure_link_resolve_denied_total`  
+**Type:** Counter  
+**Tags:**
+- `reason` - Denial reason:
+  - `not_found` - Link doesn't exist
+  - `expired` - Link has expired
+  - `revoked` - Link was revoked
+  - `view_limit_reached` - Maximum views exceeded
+  - `inactive` - Link is in unexpected state
+  - `password_required` - Password authentication needed
+  - `invalid_password` - Incorrect password provided
+
+**Usage:**
+```promql
+# Access success rate
+rate(secure_link_resolve_success_total[5m]) / 
+rate(secure_link_resolve_attempts_total[5m])
+
+# Top denial reasons
+topk(5, sum by (reason) (secure_link_resolve_denied_total))
+
+# Expired link rate
+rate(secure_link_resolve_denied_total{reason="expired"}[5m])
+```
+
+---
+
+### Resolution Duration Timer
+
+Measures the time spent resolving link accesses.
+
+**Implementation:** `br.com.walyson.secure_link.service.impl.ResolveLinkServiceImpl:48`
+
+```java
+Timer.Sample timer = Timer.start(meterRegistry);
+
+try {
+  // ... link resolution logic ...
+} finally {
+  timer.stop(
+    Timer.builder("secure_link_resolve_duration_seconds")
+      .description("Time spent resolving secure links")
+      .register(meterRegistry)
+  );
+}
+```
+
+**Metric:** `secure_link_resolve_duration_seconds`  
+**Type:** Timer  
+**Description:** Time spent processing link resolution requests
+
+**Usage:**
+```promql
+# Average resolution time
+rate(secure_link_resolve_duration_seconds_sum[5m]) /
+rate(secure_link_resolve_duration_seconds_count[5m])
+
+# 95th percentile latency
+histogram_quantile(0.95, 
+  rate(secure_link_resolve_duration_seconds_bucket[5m])
+)
+
+# Slow resolutions (> 1 second)
+sum(rate(secure_link_resolve_duration_seconds_bucket{le="1.0"}[5m]))
+```
+
+---
+
+### Link Revocation Metrics
+
+Tracks link revocation operations.
+
+**Implementation:** `br.com.walyson.secure_link.service.impl.RevokeLinkServiceImpl:31`
+
+#### Revoked Counter
+
+```java
+meterRegistry.counter("secure_link_revoked_total").increment();
+```
+
+**Metric:** `secure_link_revoked_total`  
+**Type:** Counter  
+**Description:** Successfully revoked links
+
+#### Revoke Denied Counter
+
+```java
+meterRegistry.counter(
+  "secure_link_revoke_denied_total",
+  "reason", "not_found"
+).increment();
+```
+
+**Metric:** `secure_link_revoke_denied_total`  
+**Type:** Counter  
+**Tags:**
+- `reason` - Denial reason: `not_found`
+
+**Usage:**
+```promql
+# Revocation rate
+rate(secure_link_revoked_total[5m])
+
+# Failed revocation attempts
+sum(secure_link_revoke_denied_total)
+```
+
+---
+
+## Standard Spring Boot Metrics
+
+In addition to custom metrics, the application automatically exports standard Spring Boot metrics:
+
+### JVM Metrics
+
+- `jvm_memory_used_bytes` - JVM memory usage
+- `jvm_memory_max_bytes` - Maximum JVM memory
+- `jvm_gc_pause_seconds` - Garbage collection pause times
+- `jvm_threads_live_threads` - Current thread count
+- `process_cpu_usage` - Process CPU usage
+
+### HTTP Metrics
+
+- `http_server_requests_seconds` - HTTP request duration and count
+  - Tags: `method`, `status`, `uri`, `exception`
+
+### Database Metrics (HikariCP)
+
+- `hikaricp_connections_active` - Active database connections
+- `hikaricp_connections_idle` - Idle database connections
+- `hikaricp_connections_pending` - Connections waiting to be acquired
+- `hikaricp_connections_timeout_total` - Connection timeout count
+
+### Logback Metrics
+
+- `logback_events_total` - Log events by level
+  - Tags: `level` (DEBUG, INFO, WARN, ERROR)
+
+## Configuration
+
+### Enabling Prometheus Endpoint
+
+Enable the Prometheus endpoint in `application.properties`:
+
+```properties
+management.endpoints.web.exposure.include=health,prometheus
+management.metrics.export.prometheus.enabled=true
+```
+
+### Custom Metric Tags
+
+Add global tags to all metrics:
+
+```properties
+management.metrics.tags.application=${spring.application.name}
+management.metrics.tags.environment=${spring.profiles.active}
+```
+
+### Metric Filters
+
+Disable specific metrics if needed:
+
+```properties
+management.metrics.enable.jvm=true
+management.metrics.enable.process=true
+management.metrics.enable.system=true
+management.metrics.enable.http=true
+```
+
+## Prometheus Server Configuration
+
+Configure Prometheus to scrape the metrics endpoint:
+
+```yaml
+scrape_configs:
+  - job_name: 'secure-link-api'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['localhost:8080']
+    scrape_interval: 15s
+```
+
+## Grafana Dashboard
+
+### Recommended Panels
+
+1. **Link Creation Rate**
+   ```promql
+   rate(secure_link_created_total[5m])
+   ```
+
+2. **Access Success Rate**
+   ```promql
+   rate(secure_link_resolve_success_total[5m]) /
+   rate(secure_link_resolve_attempts_total[5m]) * 100
+   ```
+
+3. **Average Resolution Time**
+   ```promql
+   rate(secure_link_resolve_duration_seconds_sum[5m]) /
+   rate(secure_link_resolve_duration_seconds_count[5m])
+   ```
+
+4. **Error Rate by Reason**
+   ```promql
+   sum by (reason) (
+     rate(secure_link_resolve_denied_total[5m])
+   )
+   ```
+
+5. **JVM Memory Usage**
+   ```promql
+   jvm_memory_used_bytes{area="heap"}
+   ```
+
+6. **HTTP Request Rate**
+   ```promql
+   rate(http_server_requests_seconds_count[5m])
+   ```
+
+## Alerting Rules
+
+### High Error Rate
+
+```yaml
+- alert: HighLinkResolutionErrorRate
+  expr: |
+    rate(secure_link_resolve_denied_total[5m]) /
+    rate(secure_link_resolve_attempts_total[5m]) > 0.1
+  for: 5m
+  labels:
+    severity: warning
+  annotations:
+    summary: High link resolution error rate
+    description: More than 10% of link resolutions are failing
+```
+
+### Slow Response Times
+
+```yaml
+- alert: SlowLinkResolution
+  expr: |
+    histogram_quantile(0.95,
+      rate(secure_link_resolve_duration_seconds_bucket[5m])
+    ) > 1.0
+  for: 5m
+  labels:
+    severity: warning
+  annotations:
+    summary: Slow link resolution times
+    description: 95th percentile resolution time exceeds 1 second
+```
+
+### High Memory Usage
+
+```yaml
+- alert: HighMemoryUsage
+  expr: |
+    jvm_memory_used_bytes{area="heap"} /
+    jvm_memory_max_bytes{area="heap"} > 0.9
+  for: 5m
+  labels:
+    severity: critical
+  annotations:
+    summary: High JVM memory usage
+    description: Heap memory usage exceeds 90%
+```
+
+<Note>
+  All custom business metrics use the `secure_link_` prefix for easy identification and filtering in Prometheus queries.
+</Note>
+
+## Best Practices
+
+1. **Use Consistent Naming** - Follow the `<namespace>_<name>_<unit>` convention
+2. **Add Meaningful Tags** - Use tags to enable flexible querying and aggregation
+3. **Avoid High Cardinality** - Don't use user IDs or timestamps as tag values
+4. **Monitor What Matters** - Focus on metrics that indicate user impact
+5. **Set Up Alerts** - Configure alerts for critical business and technical metrics
+6. **Track Trends** - Monitor rate of change, not just absolute values
+
+## Troubleshooting
+
+### Metrics Not Appearing
+
+**Check:**
+1. Actuator dependency is included
+2. Prometheus endpoint is exposed in configuration
+3. Prometheus is successfully scraping the endpoint
+4. No firewall blocking the metrics endpoint
+
+### High Metric Cardinality
+
+**Symptoms:** Prometheus performance degradation, high memory usage
+
+**Causes:** Using high-cardinality values as metric tags (user IDs, correlation IDs)
+
+**Resolution:** Remove high-cardinality tags, use labels sparingly
+
+### Missing Custom Metrics
+
+**Verify:**
+1. `MeterRegistry` is properly injected
+2. Metric registration code is executed
+3. Metric names don't contain invalid characters
+4. Counter `.increment()` is actually called

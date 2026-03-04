@@ -1,0 +1,460 @@
+---
+title: 'Observability & Tracing'
+description: 'Correlation IDs, MDC logging, error reference IDs, and distributed tracing for request tracking'
+---
+
+## Overview
+
+Secure Link API implements comprehensive observability features to enable request tracing, log correlation, and error tracking across the application. These features help debug issues, monitor system behavior, and trace requests through the entire request lifecycle.
+
+## Correlation IDs
+
+Every request is assigned a unique correlation ID that flows through all log entries and is returned to the client for reference.
+
+### How It Works
+
+The `CorrelationFilter` intercepts all incoming requests and manages correlation IDs:
+
+**Implementation:** `br.com.walyson.secure_link.config.filter.CorrelationFilter:22`
+
+```java
+@Component
+public class CorrelationFilter extends OncePerRequestFilter {
+
+  public static final String CORRELATION_ID_HEADER = "X-Correlation-Id";
+  public static final String MDC_KEY = "correlationId";
+
+  @Override
+  protected void doFilterInternal(
+    HttpServletRequest request,
+    HttpServletResponse response,
+    FilterChain filterChain
+  ) throws ServletException, IOException {
+
+    String correlationId = request.getHeader(CORRELATION_ID_HEADER);
+
+    if(correlationId == null || correlationId.isBlank()){
+      correlationId = UUID.randomUUID().toString();
+    }
+
+    try{
+      MDC.put(MDC_KEY, correlationId);
+      response.setHeader(CORRELATION_ID_HEADER, correlationId);
+      filterChain.doFilter(request, response);
+    }finally{
+      MDC.remove(MDC_KEY);
+    }
+  }
+}
+```
+
+### X-Correlation-Id Header
+
+The correlation ID is communicated via the `X-Correlation-Id` HTTP header.
+
+#### Request Flow
+
+1. **Client sends request** - Optionally includes `X-Correlation-Id` header
+2. **Filter checks header** - If present, uses client-provided ID; otherwise generates new UUID
+3. **MDC context** - Correlation ID is stored in SLF4J MDC for logging
+4. **Response includes ID** - Same correlation ID is added to response headers
+5. **MDC cleanup** - Correlation ID removed from MDC after request completes
+
+#### Client Usage
+
+**Sending correlation ID:**
+```bash
+curl -H "X-Correlation-Id: my-custom-id-123" \
+  https://api.example.com/api/v1/links/abc123
+```
+
+**Server response includes the ID:**
+```http
+HTTP/1.1 200 OK
+X-Correlation-Id: my-custom-id-123
+Content-Type: application/json
+```
+
+<Note>
+  Correlation IDs are particularly useful for:
+  - Tracing requests across microservices
+  - Correlating client-side and server-side logs
+  - Debugging specific user issues
+  - Support ticket investigation
+</Note>
+
+### Benefits
+
+1. **End-to-End Tracing** - Track a request from client to database and back
+2. **Log Correlation** - Find all logs related to a specific request
+3. **Multi-Service Correlation** - Pass the same ID across microservices
+4. **Support & Debugging** - Users can provide correlation ID when reporting issues
+
+## MDC Logging
+
+Mapped Diagnostic Context (MDC) is used to automatically include correlation IDs in every log entry.
+
+### Log Pattern Configuration
+
+The application is configured to include correlation ID in all log messages:
+
+**Configuration:** `application.properties:11`
+
+```properties
+logging.pattern.console=%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{correlationId}] %logger{36} - %msg%n
+```
+
+### Log Output Format
+
+```
+2026-03-04 14:30:15.123 INFO  [http-nio-8080-exec-1] [a7b3c9d1-4e2f-4a8b-9c6d-1e3f5a7b9c2d] c.w.s.service.ResolveLinkService - secure_link_resolve_attempt | shortCode=abc123
+2026-03-04 14:30:15.145 INFO  [http-nio-8080-exec-1] [a7b3c9d1-4e2f-4a8b-9c6d-1e3f5a7b9c2d] c.w.s.service.ResolveLinkService - secure_link_resolve_success | shortCode=abc123 viewCount=1
+```
+
+The correlation ID `a7b3c9d1-4e2f-4a8b-9c6d-1e3f5a7b9c2d` appears in brackets, making it easy to filter logs.
+
+### Querying Logs by Correlation ID
+
+Filter logs to see all entries for a specific request:
+
+```bash
+# Using grep
+grep "a7b3c9d1-4e2f-4a8b-9c6d-1e3f5a7b9c2d" application.log
+
+# Using journalctl (systemd)
+journalctl -u secure-link-api | grep "a7b3c9d1-4e2f-4a8b-9c6d-1e3f5a7b9c2d"
+
+# Using ELK/Elasticsearch
+GET /logs/_search
+{
+  "query": {
+    "match": {
+      "correlationId": "a7b3c9d1-4e2f-4a8b-9c6d-1e3f5a7b9c2d"
+    }
+  }
+}
+```
+
+### Structured Logging
+
+The application uses structured log messages with key-value pairs for better parsing:
+
+```java
+log.info(
+  "secure_link_created | type=REDIRECT shortCode={} expiresAt={} maxViews={} passwordProtected={}",
+  link.getShortCode(),
+  link.getExpiresAt(),
+  link.getMaxViews(),
+  link.isPasswordProtected()
+);
+```
+
+**Output:**
+```
+2026-03-04 14:30:15.123 INFO [http-nio-8080-exec-1] [a7b3c9d1-4e2f-4a8b-9c6d-1e3f5a7b9c2d] c.w.s.service.CreateLinkService - secure_link_created | type=REDIRECT shortCode=abc123 expiresAt=2026-03-05T14:30:15Z maxViews=10 passwordProtected=true
+```
+
+## Error Reference IDs
+
+Unexpected errors are assigned unique reference IDs to help correlate error responses with server logs.
+
+### Error Response Structure
+
+**Implementation:** `br.com.walyson.secure_link.exceptions.handler.GlobalExceptionHandler:22`
+
+```java
+@ExceptionHandler(Exception.class)
+public ResponseEntity<ApiErrorDto> handleGenericException(
+  Exception ex,
+  HttpServletRequest request
+) {
+  String errorId = UUID.randomUUID().toString();
+
+  log.error(
+    "Internal server error | errorId={} | path={}",
+    errorId,
+    request.getRequestURI(),
+    ex
+  );
+
+  HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
+
+  ApiErrorDto error = new ApiErrorDto(
+    OffsetDateTime.now(),
+    status.value(),
+    status.getReasonPhrase(), 
+    "An unexpected error occurred. Reference ID: " + errorId,
+    request.getRequestURI()
+  );
+
+  return ResponseEntity.status(status).body(error);
+}
+```
+
+### Error Response Format
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:15.123Z",
+  "status": 500,
+  "error": "Internal Server Error",
+  "message": "An unexpected error occurred. Reference ID: 7f8e9a3b-2c4d-4e5f-8a9b-1c2d3e4f5a6b",
+  "path": "/api/v1/links/abc123"
+}
+```
+
+### Using Error Reference IDs
+
+1. **Client receives error** - Error response includes reference ID in message
+2. **Support request** - User provides reference ID when reporting issue
+3. **Log search** - Search logs for `errorId=7f8e9a3b-2c4d-4e5f-8a9b-1c2d3e4f5a6b`
+4. **Root cause** - Full stack trace and context available in logs
+
+**Log entry:**
+```
+2026-03-04 14:30:15.123 ERROR [http-nio-8080-exec-1] [a7b3c9d1-4e2f-4a8b-9c6d-1e3f5a7b9c2d] c.w.s.e.h.GlobalExceptionHandler - Internal server error | errorId=7f8e9a3b-2c4d-4e5f-8a9b-1c2d3e4f5a6b | path=/api/v1/links/abc123
+java.lang.NullPointerException: Cannot invoke method on null object
+    at com.example.service.LinkService.resolve(LinkService.java:45)
+    at com.example.controller.LinkController.access(LinkController.java:23)
+    ...
+```
+
+<Note>
+  Error reference IDs are different from correlation IDs:
+  - **Correlation ID** - Tracks entire request lifecycle (success or failure)
+  - **Error Reference ID** - Only generated for unexpected exceptions, included in error message for user reference
+</Note>
+
+## API Error Response Structure
+
+All API errors follow a consistent structure:
+
+**DTO:** `br.com.walyson.secure_link.dto.error.ApiErrorDto`
+
+```java
+public record ApiErrorDto(
+  OffsetDateTime timestamp,
+  int status,
+  String error,
+  String message,
+  String path
+) {}
+```
+
+<ResponseField name="timestamp" type="string" format="ISO-8601">
+  When the error occurred
+</ResponseField>
+
+<ResponseField name="status" type="integer">
+  HTTP status code (400, 404, 500, etc.)
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  HTTP status reason phrase ("Bad Request", "Not Found", etc.)
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Human-readable error description, may include reference ID for server errors
+</ResponseField>
+
+<ResponseField name="path" type="string">
+  Request path that caused the error
+</ResponseField>
+
+## Request Tracing Examples
+
+### Example 1: Successful Request
+
+**Request:**
+```bash
+curl -X GET "https://api.example.com/api/v1/links/abc123" \
+  -H "X-Correlation-Id: client-request-001"
+```
+
+**Logs:**
+```
+2026-03-04 14:30:15.100 INFO [http-nio-8080-exec-1] [client-request-001] c.w.s.service.ResolveLinkService - secure_link_resolve_attempt | shortCode=abc123
+2026-03-04 14:30:15.145 INFO [http-nio-8080-exec-1] [client-request-001] c.w.s.service.ResolveLinkService - secure_link_resolve_success | shortCode=abc123 viewCount=1
+```
+
+**Response:**
+```http
+HTTP/1.1 302 Found
+X-Correlation-Id: client-request-001
+Location: https://example.com/target
+```
+
+---
+
+### Example 2: Failed Request (Link Not Found)
+
+**Request:**
+```bash
+curl -X GET "https://api.example.com/api/v1/links/invalid" \
+  -H "X-Correlation-Id: client-request-002"
+```
+
+**Logs:**
+```
+2026-03-04 14:35:20.100 INFO  [http-nio-8080-exec-2] [client-request-002] c.w.s.service.ResolveLinkService - secure_link_resolve_attempt | shortCode=invalid
+2026-03-04 14:35:20.105 WARN  [http-nio-8080-exec-2] [client-request-002] c.w.s.service.ResolveLinkService - secure_link_resolve_denied | shortCode=invalid reason=NOT_FOUND
+```
+
+**Response:**
+```http
+HTTP/1.1 404 Not Found
+X-Correlation-Id: client-request-002
+Content-Type: application/json
+
+{
+  "timestamp": "2026-03-04T14:35:20.105Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Link not found",
+  "path": "/api/v1/links/invalid"
+}
+```
+
+---
+
+### Example 3: Server Error
+
+**Request:**
+```bash
+curl -X GET "https://api.example.com/api/v1/links/abc123"
+```
+
+**Logs:**
+```
+2026-03-04 14:40:30.100 INFO  [http-nio-8080-exec-3] [3a5b7c9d-1e2f-4a6b-8c9d-0e1f2a3b4c5d] c.w.s.service.ResolveLinkService - secure_link_resolve_attempt | shortCode=abc123
+2026-03-04 14:40:30.150 ERROR [http-nio-8080-exec-3] [3a5b7c9d-1e2f-4a6b-8c9d-0e1f2a3b4c5d] c.w.s.e.h.GlobalExceptionHandler - Internal server error | errorId=9f1e2d3c-4b5a-6789-0abc-def123456789 | path=/api/v1/links/abc123
+java.sql.SQLException: Connection timeout
+    at com.mysql.cj.jdbc.ConnectionImpl.executeQuery(...)
+    ...
+```
+
+**Response:**
+```http
+HTTP/1.1 500 Internal Server Error
+X-Correlation-Id: 3a5b7c9d-1e2f-4a6b-8c9d-0e1f2a3b4c5d
+Content-Type: application/json
+
+{
+  "timestamp": "2026-03-04T14:40:30.150Z",
+  "status": 500,
+  "error": "Internal Server Error",
+  "message": "An unexpected error occurred. Reference ID: 9f1e2d3c-4b5a-6789-0abc-def123456789",
+  "path": "/api/v1/links/abc123"
+}
+```
+
+## Log Aggregation Integration
+
+### ELK Stack (Elasticsearch, Logstash, Kibana)
+
+**Logstash Configuration:**
+```ruby
+filter {
+  grok {
+    match => {
+      "message" => "%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:level} \[%{DATA:thread}\] \[%{UUID:correlationId}\] %{DATA:logger} - %{GREEDYDATA:log_message}"
+    }
+  }
+}
+```
+
+**Kibana Query:**
+```
+correlationId:"a7b3c9d1-4e2f-4a8b-9c6d-1e3f5a7b9c2d"
+```
+
+### Splunk
+
+**Search Query:**
+```spl
+index=secure_link correlationId="a7b3c9d1-4e2f-4a8b-9c6d-1e3f5a7b9c2d"
+| table timestamp level logger log_message
+| sort timestamp
+```
+
+### CloudWatch Logs
+
+**Filter Pattern:**
+```
+[timestamp, level, thread, correlationId="a7b3c9d1-4e2f-4a8b-9c6d-1e3f5a7b9c2d", ...]
+```
+
+## Best Practices
+
+1. **Always Use Correlation IDs** - Include `X-Correlation-Id` in client requests when possible
+2. **Log at Appropriate Levels** - Use INFO for business events, WARN for handled errors, ERROR for exceptions
+3. **Include Context** - Add relevant context (shortCode, userId) to log messages
+4. **Preserve IDs Across Services** - Pass correlation ID to downstream services
+5. **Document Error References** - Train support staff to ask users for reference IDs
+6. **Centralize Logs** - Use log aggregation tools for searching across instances
+7. **Set Retention Policies** - Keep logs long enough to investigate issues
+
+## Monitoring & Alerting
+
+### Log-Based Alerts
+
+Set up alerts for error patterns:
+
+**High error rate:**
+```
+COUNT(level="ERROR" AND correlationId IS NOT NULL) > 10 IN 5 minutes
+```
+
+**Specific errors:**
+```
+message CONTAINS "Connection timeout" IN last 1 minute
+```
+
+**Missing correlation IDs:**
+```
+COUNT(correlationId IS NULL OR correlationId="") > 0
+```
+
+## Troubleshooting
+
+### Missing Correlation IDs in Logs
+
+**Symptoms:** Logs don't include correlation ID in brackets
+
+**Possible Causes:**
+- MDC not configured in logging pattern
+- Filter not registered or not executing
+- Async threads not propagating MDC
+
+**Resolution:**
+1. Verify logging pattern includes `%X{correlationId}`
+2. Check filter is registered as Spring component
+3. Use MDC propagation for async operations
+
+### Correlation ID Not in Response
+
+**Symptoms:** `X-Correlation-Id` header missing from response
+
+**Possible Causes:**
+- Filter not executing for certain paths
+- Response written before filter completes
+- Proxy stripping headers
+
+**Resolution:**
+1. Verify filter applies to request path
+2. Check filter order and configuration
+3. Review proxy/gateway configuration
+
+### Cannot Find Logs by Error Reference ID
+
+**Symptoms:** Error ID in response but not in logs
+
+**Possible Causes:**
+- Logs not shipped to aggregation system
+- Log retention period expired
+- Wrong log level filter
+
+**Resolution:**
+1. Check log shipping configuration
+2. Verify log retention settings
+3. Ensure ERROR level logs are collected

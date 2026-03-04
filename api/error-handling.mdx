@@ -1,0 +1,268 @@
+---
+title: Error Handling
+description: Error response format, status codes, and tracing mechanisms
+---
+
+## Error Response Format
+
+All API errors return a consistent JSON structure defined by the `ApiErrorDto` class.
+
+### ApiErrorDto Structure
+
+<ResponseField name="timestamp" type="string" required>
+  ISO 8601 timestamp when the error occurred (with timezone offset)
+</ResponseField>
+
+<ResponseField name="status" type="integer" required>
+  HTTP status code (e.g., 400, 404, 500)
+</ResponseField>
+
+<ResponseField name="error" type="string" required>
+  HTTP status reason phrase (e.g., "Bad Request", "Not Found")
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Human-readable error message describing what went wrong
+</ResponseField>
+
+<ResponseField name="path" type="string" required>
+  The request URI that caused the error
+</ResponseField>
+
+### Example Error Response
+
+```json
+{
+  "timestamp": "2026-03-04T10:30:45.123+00:00",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Link not found",
+  "path": "/l/invalidCode"
+}
+```
+
+**Reference**: ApiErrorDto.java:5-11
+
+## HTTP Status Codes
+
+The Secure Link API uses the following HTTP status codes:
+
+### Success Codes
+
+| Code | Status | Description |
+|------|--------|-------------|
+| `200` | OK | Request succeeded (GET requests, stats endpoints) |
+| `201` | Created | Link created successfully (POST requests) |
+| `204` | No Content | Link revoked successfully (DELETE requests) |
+| `302` | Found | Redirect link resolved (when Accept header is not JSON) |
+
+### Client Error Codes
+
+| Code | Status | Description |
+|------|--------|-------------|
+| `400` | Bad Request | Validation error or malformed request |
+| `401` | Unauthorized | Password required or invalid password |
+| `404` | Not Found | Link not found |
+| `410` | Gone | Link expired, revoked, or view limit reached |
+
+### Server Error Codes
+
+| Code | Status | Description |
+|------|--------|-------------|
+| `500` | Internal Server Error | Unexpected server error occurred |
+
+## Error Scenarios
+
+### Link Not Found (404)
+
+Returned when the requested short code does not exist in the database.
+
+```json
+{
+  "timestamp": "2026-03-04T10:30:45.123Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Link not found",
+  "path": "/l/nonexistent"
+}
+```
+
+**Reference**: ResolveLinkServiceImpl:58-69
+
+### Link Expired (410)
+
+Returned when the link has expired (time-based or view limit).
+
+```json
+{
+  "timestamp": "2026-03-04T10:30:45.123Z",
+  "status": 410,
+  "error": "Gone",
+  "message": "Link access denied",
+  "path": "/l/abc123xyz"
+}
+```
+
+**Triggered by**:
+- Time-based expiration (`expiresAt` passed)
+- View limit reached (`viewCount >= maxViews`)
+
+**Reference**: ResolveLinkServiceImpl:74-82
+
+### Link Revoked (410)
+
+Returned when the link has been manually revoked.
+
+```json
+{
+  "timestamp": "2026-03-04T10:30:45.123Z",
+  "status": 410,
+  "error": "Gone",
+  "message": "Link access denied",
+  "path": "/l/abc123xyz"
+}
+```
+
+**Reference**: ResolveLinkServiceImpl:71-73
+
+### Password Required (401)
+
+Returned when accessing a password-protected link without providing the password.
+
+```json
+{
+  "timestamp": "2026-03-04T10:30:45.123Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Password required",
+  "path": "/l/abc123xyz"
+}
+```
+
+**Reference**: ResolveLinkServiceImpl:87-90
+
+### Invalid Password (401)
+
+Returned when the provided password does not match the link's password.
+
+```json
+{
+  "timestamp": "2026-03-04T10:30:45.123Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Invalid password",
+  "path": "/l/abc123xyz"
+}
+```
+
+**Reference**: ResolveLinkServiceImpl:91-93
+
+### Validation Error (400)
+
+Returned when request validation fails (e.g., invalid URL, invalid date format).
+
+```json
+{
+  "timestamp": "2026-03-04T10:30:45.123Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "targetUrl: must be a valid URL",
+  "path": "/api/links"
+}
+```
+
+**Reference**: GlobalExceptionHandler:49-72
+
+### Internal Server Error (500)
+
+Returned when an unexpected error occurs. Includes a unique error ID for tracking.
+
+```json
+{
+  "timestamp": "2026-03-04T10:30:45.123Z",
+  "status": 500,
+  "error": "Internal Server Error",
+  "message": "An unexpected error occurred. Reference ID: 550e8400-e29b-41d4-a716-446655440000",
+  "path": "/api/links"
+}
+```
+
+**Reference**: GlobalExceptionHandler:21-46
+
+## Error Tracing
+
+### Correlation IDs
+
+Every request is assigned a unique correlation ID via the `X-Correlation-Id` header. This ID is:
+
+- Automatically generated for each request
+- Included in all server logs using MDC (Mapped Diagnostic Context)
+- Used to trace requests across the application
+
+**Log Pattern**:
+```
+%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{correlationId}] %logger{36} - %msg%n
+```
+
+**Reference**: application.properties:11
+
+<Note>
+  The correlation ID appears in square brackets in every log entry, making it easy to trace a specific request through the entire system.
+</Note>
+
+### Error Reference IDs
+
+For `500 Internal Server Error` responses, a unique `errorId` (UUID) is generated and included in:
+
+1. The error response message
+2. Server logs
+
+This allows support teams to correlate user-reported errors with specific log entries.
+
+**Example Log Entry**:
+```
+2026-03-04 10:30:45.123 ERROR [http-nio-8080-exec-1] [a1b2c3d4] o.s.s.c.e.h.GlobalExceptionHandler - Internal server error | errorId=550e8400-e29b-41d4-a716-446655440000 | path=/api/links
+```
+
+**Reference**: GlobalExceptionHandler:26-33
+
+### Audit Trail
+
+All link access attempts (successful or failed) are recorded in the audit system with the following information:
+
+- Short code
+- Access result (SUCCESS, NOT_FOUND, EXPIRED, REVOKED, PASSWORD_REQUIRED, INVALID_PASSWORD, etc.)
+- IP address
+- User agent
+- Timestamp
+
+This audit trail can be used for:
+- Security monitoring
+- Access analytics
+- Debugging access issues
+
+**Reference**: ResolveLinkServiceImpl:66, 105, 138
+
+## Exception Handling
+
+The `GlobalExceptionHandler` class handles all exceptions globally using Spring's `@RestControllerAdvice`.
+
+### Handled Exception Types
+
+1. **Generic Exceptions** → 500 Internal Server Error
+2. **MethodArgumentNotValidException** → 400 Bad Request
+3. **ResponseStatusException** → Status code from exception
+
+**Reference**: GlobalExceptionHandler.java
+
+<Warning>
+  Always check the `errorId` in 500 errors when reporting issues. This ID is essential for locating the relevant logs.
+</Warning>
+
+## Best Practices
+
+1. **Log Correlation IDs**: Always include the correlation ID when reporting issues
+2. **Save Error IDs**: For 500 errors, save the error reference ID from the message
+3. **Check Audit Logs**: Use the audit trail to investigate access failures
+4. **Monitor Status Codes**: Track 410 responses to understand link expiration patterns
+5. **Validate Early**: Client-side validation can prevent most 400 errors

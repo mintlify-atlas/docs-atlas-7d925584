@@ -1,0 +1,133 @@
+---
+title: API Overview
+description: Overview of the Secure Link API endpoints, base URL, and common patterns
+---
+
+## Base URL
+
+The Secure Link API is available at:
+
+```
+http://localhost:8080
+```
+
+<Note>
+  The base URL can be configured via the `BASE_URL` environment variable or the `app.base-url` property in `application.properties`.
+</Note>
+
+## API Endpoints
+
+The Secure Link API provides the following endpoints:
+
+### Link Management
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/links` | Create a new redirect link |
+| `POST` | `/api/links/upload` | Upload a file and create a download link |
+| `GET` | `/l/{shortCode}` | Resolve and access a link (redirect or download) |
+| `DELETE` | `/l/{shortCode}` | Revoke a link |
+
+### Statistics
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/stats/access/summary` | Get access summary statistics |
+| `GET` | `/api/stats/access/hourly` | Get hourly access statistics |
+| `GET` | `/api/stats/access/daily` | Get daily access statistics |
+| `GET` | `/api/stats/access/failures` | Get failure statistics by result type |
+| `GET` | `/api/stats/security/exceptions` | Get top security exceptions |
+| `GET` | `/api/stats/links` | Get link status statistics |
+| `GET` | `/api/stats/links/top` | Get top accessed links |
+
+## Common Patterns
+
+### Request/Response Format
+
+All API endpoints accept and return JSON data (except file uploads and downloads).
+
+**Content-Type Headers:**
+- JSON requests: `Content-Type: application/json`
+- File uploads: `Content-Type: multipart/form-data`
+- File downloads: `Content-Type: application/octet-stream`
+
+### Timestamp Format
+
+All timestamps are in ISO 8601 format with timezone offset:
+
+```json
+{
+  "timestamp": "2026-03-04T10:30:45.123+00:00"
+}
+```
+
+<Note>
+  The API uses `OffsetDateTime` for all temporal data, ensuring timezone-aware timestamps.
+</Note>
+
+### Link Expiration
+
+Links can expire based on:
+- **Time-based expiration**: `expiresAt` timestamp (ISO 8601 format)
+- **View limit**: `maxViews` parameter (maximum number of successful accesses)
+- **Manual revocation**: Via `DELETE /l/{shortCode}`
+
+### Short Codes
+
+Every link is assigned a unique `shortCode` identifier that is used in the URL path:
+
+```
+https://yourapp.com/l/abc123xyz
+```
+
+The short code is:
+- Generated automatically by the system
+- Case-sensitive
+- Unique across all links
+- Used for resolving, revoking, and tracking links
+
+### Password Protection
+
+Links can be optionally password-protected. When accessing a password-protected link, the password must be provided via the `X-Link-Password` header.
+
+See [Authentication](/api/authentication) for details.
+
+### Correlation IDs
+
+All API responses include an `X-Correlation-Id` header for request tracing. This correlation ID is also included in server logs using MDC (Mapped Diagnostic Context).
+
+**Log Pattern:**
+```
+%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{correlationId}] %logger{36} - %msg%n
+```
+
+See [Error Handling](/api/error-handling) for more on correlation IDs and error tracking.
+
+### File Upload Limits
+
+File uploads are subject to the following limits:
+
+- **Maximum file size**: 50 MB
+- **Maximum request size**: 50 MB
+
+<Warning>
+  Exceeding these limits will result in a `413 Payload Too Large` error.
+</Warning>
+
+## CORS Configuration
+
+By default, the API allows CORS requests from:
+- `http://localhost:4200`
+- `http://127.0.0.1:4200`
+
+Additional origins can be configured via the `app.cors.allowed-origins` property.
+
+## Default TTL
+
+If no `expiresAt` value is provided when creating a link, the default TTL (Time To Live) is:
+
+```
+PT24H (24 hours)
+```
+
+This can be configured via the `app.link.default-ttl` property (ISO-8601 Duration format).

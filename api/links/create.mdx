@@ -1,0 +1,402 @@
+---
+title: 'Create Link'
+description: 'Create a secure link with expiration, access limits, and optional password protection'
+---
+
+## Endpoint
+
+<Note>
+  This endpoint creates a new secure link that redirects to a target URL with optional expiration, view limits, and password protection.
+</Note>
+
+```http
+POST /api/links
+```
+
+## Request Body
+
+<ParamField body="targetUrl" type="string" required>
+  The destination URL that the secure link will redirect to.
+  
+  **Validation:**
+  - Required field (cannot be blank)
+  - Must be a valid URL format
+  - Must include protocol (http:// or https://)
+  
+  **Example:** `https://example.com/document.pdf`
+</ParamField>
+
+<ParamField body="expiresAt" type="string">
+  ISO 8601 timestamp indicating when the link should expire.
+  
+  **Validation:**
+  - Must be a future date/time
+  - Format: `YYYY-MM-DDTHH:mm:ss±HH:mm` (ISO 8601 with timezone)
+  - If not provided, the link will not have time-based expiration
+  
+  **Example:** `2026-12-31T23:59:59+00:00`
+</ParamField>
+
+<ParamField body="maxViews" type="integer">
+  Maximum number of times the link can be accessed before it becomes invalid.
+  
+  **Validation:**
+  - Must be a positive integer (> 0)
+  - If not provided, the link will not have view-based expiration
+  
+  **Example:** `5`
+</ParamField>
+
+<ParamField body="password" type="string">
+  Optional password required to access the link. When set, clients must provide this password via the `X-Link-Password` header when accessing the link.
+  
+  **Security:**
+  - Stored as a bcrypt hash
+  - Required via HTTP header on link resolution
+  - No length restrictions (recommended: 8+ characters)
+  
+  **Example:** `mySecurePassword123`
+</ParamField>
+
+## Response
+
+<ResponseField name="shortCode" type="string">
+  Unique identifier for the created link. This code is used in the access URL.
+  
+  **Format:** 8-character alphanumeric string
+  
+  **Example:** `K2x9pLmN`
+</ResponseField>
+
+<ResponseField name="accessUrl" type="string">
+  The full URL path to access the secure link.
+  
+  **Format:** `/l/{shortCode}`
+  
+  **Example:** `http://localhost:8080/l/K2x9pLmN`
+</ResponseField>
+
+<ResponseField name="expiresAt" type="string">
+  ISO 8601 timestamp when the link expires (if expiration was set).
+  
+  **Format:** `YYYY-MM-DDTHH:mm:ss±HH:mm`
+  
+  **Example:** `2026-12-31T23:59:59+00:00`
+</ResponseField>
+
+<ResponseField name="maxViews" type="integer">
+  Maximum number of views allowed (if view limit was set).
+  
+  **Example:** `5`
+</ResponseField>
+
+## Status Codes
+
+<ResponseField name="201" type="Created">
+  Link successfully created. Response body contains the link details.
+</ResponseField>
+
+<ResponseField name="400" type="Bad Request">
+  Request validation failed. Possible causes:
+  - Missing or blank `targetUrl`
+  - Invalid URL format in `targetUrl`
+  - `expiresAt` is not a future date
+  - `maxViews` is not a positive integer
+  
+  **Error response includes:**
+  - `timestamp`: When the error occurred
+  - `status`: HTTP status code (400)
+  - `error`: "Bad Request"
+  - `message`: Specific validation error (e.g., "targetUrl: must be a well-formed URL")
+  - `path`: Request path that caused the error
+</ResponseField>
+
+<ResponseField name="500" type="Internal Server Error">
+  Unexpected server error occurred.
+  
+  **Error response includes:**
+  - `timestamp`: When the error occurred
+  - `status`: HTTP status code (500)
+  - `error`: "Internal Server Error"
+  - `message`: Generic error message with reference ID for troubleshooting
+  - `path`: Request path that caused the error
+</ResponseField>
+
+## Examples
+
+### Basic Link (No Expiration)
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetUrl": "https://example.com"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:8080/api/links', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    targetUrl: 'https://example.com'
+  })
+});
+
+const link = await response.json();
+console.log(link.accessUrl);
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    'http://localhost:8080/api/links',
+    json={'targetUrl': 'https://example.com'}
+)
+
+link = response.json()
+print(link['accessUrl'])
+```
+
+</CodeGroup>
+
+**Response (201 Created):**
+
+```json
+{
+  "shortCode": "K2x9pLmN",
+  "accessUrl": "http://localhost:8080/l/K2x9pLmN",
+  "expiresAt": null,
+  "maxViews": null
+}
+```
+
+### Link with Time Expiration
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetUrl": "https://example.com/report.pdf",
+    "expiresAt": "2026-12-31T23:59:59+00:00"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:8080/api/links', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    targetUrl: 'https://example.com/report.pdf',
+    expiresAt: '2026-12-31T23:59:59+00:00'
+  })
+});
+```
+
+```python Python
+from datetime import datetime, timezone
+
+expiration = datetime(2026, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+
+response = requests.post(
+    'http://localhost:8080/api/links',
+    json={
+        'targetUrl': 'https://example.com/report.pdf',
+        'expiresAt': expiration.isoformat()
+    }
+)
+```
+
+</CodeGroup>
+
+**Response (201 Created):**
+
+```json
+{
+  "shortCode": "A7bCdEfG",
+  "accessUrl": "http://localhost:8080/l/A7bCdEfG",
+  "expiresAt": "2026-12-31T23:59:59+00:00",
+  "maxViews": null
+}
+```
+
+### Link with View Limit
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetUrl": "https://example.com/secret-video",
+    "maxViews": 10
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:8080/api/links', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    targetUrl: 'https://example.com/secret-video',
+    maxViews: 10
+  })
+});
+```
+
+```python Python
+response = requests.post(
+    'http://localhost:8080/api/links',
+    json={
+        'targetUrl': 'https://example.com/secret-video',
+        'maxViews': 10
+    }
+)
+```
+
+</CodeGroup>
+
+**Response (201 Created):**
+
+```json
+{
+  "shortCode": "X1yZ2aBc",
+  "accessUrl": "http://localhost:8080/l/X1yZ2aBc",
+  "expiresAt": null,
+  "maxViews": 10
+}
+```
+
+### Fully Protected Link
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetUrl": "https://example.com/confidential-document.pdf",
+    "expiresAt": "2026-03-15T18:00:00+00:00",
+    "maxViews": 5,
+    "password": "SecurePass2024!"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:8080/api/links', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    targetUrl: 'https://example.com/confidential-document.pdf',
+    expiresAt: '2026-03-15T18:00:00+00:00',
+    maxViews: 5,
+    password: 'SecurePass2024!'
+  })
+});
+```
+
+```python Python
+response = requests.post(
+    'http://localhost:8080/api/links',
+    json={
+        'targetUrl': 'https://example.com/confidential-document.pdf',
+        'expiresAt': '2026-03-15T18:00:00+00:00',
+        'maxViews': 5,
+        'password': 'SecurePass2024!'
+    }
+)
+```
+
+</CodeGroup>
+
+**Response (201 Created):**
+
+```json
+{
+  "shortCode": "P9qRsTuV",
+  "accessUrl": "http://localhost:8080/l/P9qRsTuV",
+  "expiresAt": "2026-03-15T18:00:00+00:00",
+  "maxViews": 5
+}
+```
+
+<Note>
+  Password is not returned in the response for security reasons. Users must provide the password via the `X-Link-Password` header when accessing the link.
+</Note>
+
+### Validation Error Example
+
+**Request with invalid URL:**
+
+```bash
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetUrl": "not-a-valid-url",
+    "maxViews": 5
+  }'
+```
+
+**Response (400 Bad Request):**
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00+00:00",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "targetUrl: must be a valid URL",
+  "path": "/api/links"
+}
+```
+
+### Past Expiration Date Error
+
+**Request with past date:**
+
+```bash
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetUrl": "https://example.com",
+    "expiresAt": "2020-01-01T00:00:00+00:00"
+  }'
+```
+
+**Response (400 Bad Request):**
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00+00:00",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "expiresAt: must be a future date",
+  "path": "/api/links"
+}
+```
+
+## Related Endpoints
+
+<CardGroup cols={2}>
+  <Card title="Upload Link" icon="upload" href="/api/links/upload">
+    Upload a file and create a secure download link
+  </Card>
+  <Card title="Resolve Link" icon="link" href="/api/links/resolve">
+    Access a secure link using its short code
+  </Card>
+  <Card title="Revoke Link" icon="ban" href="/api/links/revoke">
+    Permanently disable a secure link
+  </Card>
+</CardGroup>

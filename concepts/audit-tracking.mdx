@@ -1,0 +1,451 @@
+---
+title: Audit Tracking
+description: Understanding the audit system, what gets tracked, and AccessResult enum values
+icon: list-check
+---
+
+## Overview
+
+The Secure Link API maintains a comprehensive audit trail of every link access attempt, regardless of success or failure. This provides visibility into link usage patterns, security events, and potential abuse.
+
+## Why Audit Tracking?
+
+<CardGroup cols={2}>
+
+<Card title="Security Monitoring" icon="shield">
+Detect unauthorized access attempts and potential security threats
+</Card>
+
+<Card title="Usage Analytics" icon="chart-line">
+Analyze link performance, popular content, and access patterns
+</Card>
+
+<Card title="Compliance" icon="file-contract">
+Maintain records for regulatory requirements and data governance
+</Card>
+
+<Card title="Troubleshooting" icon="wrench">
+Diagnose access issues and validate security configuration
+</Card>
+
+</CardGroup>
+
+## What Gets Tracked
+
+Every access attempt generates an audit record with the following information:
+
+### Audit Record Structure
+
+```java LinkAccessAudit.java:21-48
+@Entity
+@Table(name = "link_access_audit")
+public class LinkAccessAudit {
+  
+  @Id
+  @GeneratedValue(strategy = GenerationType.UUID)
+  private UUID id;
+  
+  @Column(name = "short_code", nullable = false, length = 20)
+  private String shortCode;
+  
+  @Enumerated(EnumType.STRING)
+  @Column(nullable = false, length = 30)
+  private AccessResult result;
+  
+  @Column(name = "ip_address", length = 45)
+  private String ipAddress;
+  
+  @Column(name = "user_agent", length = 500)
+  private String userAgent;
+  
+  @Column(name = "accessed_at", nullable = false)
+  private OffsetDateTime accessedAt;
+}
+```
+
+### Field Descriptions
+
+<ParamField path="shortCode" type="string" required>
+  The unique identifier of the link being accessed
+</ParamField>
+
+<ParamField path="result" type="AccessResult" required>
+  The outcome of the access attempt (see AccessResult enum below)
+</ParamField>
+
+<ParamField path="ipAddress" type="string">
+  Client IP address (supports both IPv4 and IPv6, max 45 characters)
+</ParamField>
+
+<ParamField path="userAgent" type="string">
+  Client user agent string (browser, app, bot identifier)
+</ParamField>
+
+<ParamField path="accessedAt" type="OffsetDateTime" required>
+  Timestamp when the access attempt occurred (timezone-aware)
+</ParamField>
+
+## AccessResult Enum
+
+The `AccessResult` enum captures the outcome of every access validation:
+
+<CodeGroup>
+
+```java AccessResult.java
+package br.com.walyson.secure_link.domain.enums;
+
+public enum AccessResult {
+  SUCCESS,
+  NOT_FOUND,
+  REVOKED,
+  EXPIRED,
+  VIEW_LIMIT_REACHED,
+  PASSWORD_REQUIRED,
+  INVALID_PASSWORD,
+  UNEXPECTED_STATE
+}
+```
+
+</CodeGroup>
+
+### Result Values
+
+<AccordionGroup>
+
+<Accordion title="SUCCESS" icon="check">
+**Access granted** - All validation checks passed.
+
+**Details:**
+- Link exists and is ACTIVE
+- Not expired by time or view limit
+- Password validated (if required)
+- View count incremented
+- Content returned to client
+
+**HTTP Status:** 200 OK or 302 Found
+</Accordion>
+
+<Accordion title="NOT_FOUND" icon="magnifying-glass">
+**Link does not exist** - No link found with the provided shortCode.
+
+**Details:**
+- shortCode not in database
+- Could indicate deleted link, typo, or enumeration attempt
+- Most common for expired/cleaned-up links
+
+**HTTP Status:** 404 Not Found
+
+**Security Note:** May indicate reconnaissance or brute-force attempts if frequent.
+</Accordion>
+
+<Accordion title="REVOKED" icon="ban">
+**Link manually disabled** - Administrator revoked the link.
+
+**Details:**
+- Link exists but status is REVOKED
+- Permanent denial (cannot be un-revoked)
+- Typically used for compromised or abused links
+
+**HTTP Status:** 410 Gone
+</Accordion>
+
+<Accordion title="EXPIRED" icon="clock">
+**Time-based expiration** - Link exceeded its expiresAt timestamp.
+
+**Details:**
+- Current time > expiresAt
+- Link status automatically updated to EXPIRED
+- Expected outcome for time-limited sharing
+
+**HTTP Status:** 410 Gone
+
+```java ResolveLinkServiceImpl.java:74-77
+if (link.isExpired()) {
+  repository.save(link);
+  handleDenied(link.getShortCode(), AccessResult.EXPIRED, "expired", context);
+}
+```
+</Accordion>
+
+<Accordion title="VIEW_LIMIT_REACHED" icon="eye-slash">
+**Usage limit exceeded** - Link has been accessed maxViews times.
+
+**Details:**
+- viewCount >= maxViews
+- Link status automatically updated to EXPIRED
+- Used for one-time or limited-distribution content
+
+**HTTP Status:** 410 Gone
+
+```java ResolveLinkServiceImpl.java:78-82
+if (link.hasReachedViewLimit()) {
+  link.expire();
+  repository.save(link);
+  handleDenied(link.getShortCode(), AccessResult.VIEW_LIMIT_REACHED, "view_limit_reached", context);
+}
+```
+</Accordion>
+
+<Accordion title="PASSWORD_REQUIRED" icon="lock">
+**Missing password** - Link requires password but none provided.
+
+**Details:**
+- Link has passwordProtected = true
+- Client did not provide password parameter
+- Informational denial (not necessarily malicious)
+
+**HTTP Status:** 401 Unauthorized
+
+```java ResolveLinkServiceImpl.java:88-90
+if (password == null || password.isBlank()) {
+  handleDenied(link.getShortCode(), AccessResult.PASSWORD_REQUIRED, 
+    "password_required", HttpStatus.UNAUTHORIZED, "Password required", context);
+}
+```
+</Accordion>
+
+<Accordion title="INVALID_PASSWORD" icon="key">
+**Password mismatch** - Provided password does not match stored hash.
+
+**Details:**
+- Password provided but BCrypt validation failed
+- Could indicate legitimate user error or attack attempt
+- Multiple failures may indicate brute-force attack
+
+**HTTP Status:** 401 Unauthorized
+
+**Security Note:** Monitor for repeated INVALID_PASSWORD from same IP.
+
+```java ResolveLinkServiceImpl.java:91-93
+if (!passwordEncoder.matches(password, link.getPasswordHash())) {
+  handleDenied(link.getShortCode(), AccessResult.INVALID_PASSWORD, 
+    "invalid_password", HttpStatus.UNAUTHORIZED, "Invalid password", context);
+}
+```
+</Accordion>
+
+<Accordion title="UNEXPECTED_STATE" icon="triangle-exclamation">
+**Invalid link state** - Link exists but is not ACTIVE (edge case).
+
+**Details:**
+- Link passed existence check but isActive() returned false
+- Should be rare; indicates potential data consistency issue
+- May occur during concurrent status transitions
+
+**HTTP Status:** 410 Gone
+
+```java ResolveLinkServiceImpl.java:83-85
+if (!link.isActive()) {
+  handleDenied(link.getShortCode(), AccessResult.UNEXPECTED_STATE, "inactive", context);
+}
+```
+</Accordion>
+
+</AccordionGroup>
+
+## Audit Recording Process
+
+Audit records are created **automatically** for every access attempt, using a separate transaction to ensure records are preserved even if the main request fails.
+
+### Implementation
+
+```java LinkAccesAuditServiceImpl.java:22-34
+@Transactional(propagation = Propagation.REQUIRES_NEW)
+public void audit(String shortCode, AccessResult result, String ipAddress, String userAgent) {
+  
+  LinkAccessAudit audit = LinkAccessAudit.builder()
+    .shortCode(shortCode)
+    .result(result)
+    .ipAddress(ipAddress)
+    .userAgent(userAgent)
+    .accessedAt(OffsetDateTime.now())
+    .build();
+  
+  repository.save(audit);
+}
+```
+
+<Info>
+The `REQUIRES_NEW` transaction propagation ensures audit records are committed **even if the parent transaction rolls back**. This guarantees no access attempt goes unrecorded.
+</Info>
+
+### Audit Points in Resolution Flow
+
+Audit records are created at multiple points during link resolution:
+
+```java ResolveLinkServiceImpl.java:57-105
+// Point 1: Link not found
+SecureLink link = repository.findByShortCode(shortCode)
+  .orElseThrow(() -> {
+    auditService.audit(shortCode, AccessResult.NOT_FOUND, context.ipAddress(), context.userAgent());
+    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Link not found");
+  });
+
+// Point 2: Validation failures
+if (link.isRevoked()) {
+  handleDenied(link.getShortCode(), AccessResult.REVOKED, "revoked", context);
+  // handleDenied() calls auditService.audit()
+}
+
+// Point 3: Success
+auditService.audit(shortCode, AccessResult.SUCCESS, context.ipAddress(), context.userAgent());
+```
+
+## Access Context
+
+Client information is captured from the HTTP request:
+
+```java AccessContextDto.java
+public record AccessContextDto(
+  String ipAddress,
+  String userAgent
+) {}
+```
+
+This context is extracted from:
+- **IP Address:** `X-Forwarded-For` header or direct connection IP
+- **User Agent:** `User-Agent` HTTP header
+
+## Analytics and Reporting
+
+The audit data powers various analytics endpoints:
+
+### Access Summary
+
+```http
+GET /api/stats/access-summary?start=2024-01-01T00:00:00Z&end=2024-12-31T23:59:59Z
+```
+
+Returns aggregate statistics:
+- Total access attempts
+- Successful accesses
+- Failed accesses by reason
+
+### Daily/Hourly Access Trends
+
+```http
+GET /api/stats/daily-access?start=2024-01-01&end=2024-12-31
+GET /api/stats/hourly-access?start=2024-03-01T00:00:00Z&end=2024-03-01T23:59:59Z
+```
+
+Time-series data for traffic analysis.
+
+### Access by Result
+
+```http
+GET /api/stats/access-by-result?start=2024-01-01T00:00:00Z&end=2024-12-31T23:59:59Z
+```
+
+Breakdown of access attempts by AccessResult value.
+
+### Security Exceptions
+
+```http
+GET /api/stats/security-exceptions?limit=100
+```
+
+Recent failed access attempts for security monitoring.
+
+## Security Monitoring Use Cases
+
+### Detecting Brute Force Attacks
+
+Monitor for multiple `INVALID_PASSWORD` results from the same IP:
+
+```sql
+SELECT ip_address, COUNT(*) as attempts
+FROM link_access_audit
+WHERE result = 'INVALID_PASSWORD'
+  AND accessed_at > NOW() - INTERVAL '1 hour'
+GROUP BY ip_address
+HAVING COUNT(*) > 10
+ORDER BY attempts DESC;
+```
+
+### Link Enumeration Detection
+
+Identify potential shortCode enumeration attempts:
+
+```sql
+SELECT ip_address, COUNT(DISTINCT short_code) as unique_codes, COUNT(*) as attempts
+FROM link_access_audit
+WHERE result = 'NOT_FOUND'
+  AND accessed_at > NOW() - INTERVAL '1 hour'
+GROUP BY ip_address
+HAVING COUNT(*) > 50
+ORDER BY attempts DESC;
+```
+
+### Popular Link Analysis
+
+```sql
+SELECT short_code, COUNT(*) as successful_accesses
+FROM link_access_audit
+WHERE result = 'SUCCESS'
+  AND accessed_at > NOW() - INTERVAL '7 days'
+GROUP BY short_code
+ORDER BY successful_accesses DESC
+LIMIT 10;
+```
+
+## Best Practices
+
+<Steps>
+
+<Step title="Regular Monitoring">
+Review security exceptions daily to detect abuse patterns early.
+</Step>
+
+<Step title="Retention Policy">
+Implement audit log retention policies based on compliance requirements (e.g., 90 days, 1 year).
+</Step>
+
+<Step title="Alerting">
+Set up automated alerts for:
+- Sudden spikes in `NOT_FOUND` results (enumeration)
+- High volumes of `INVALID_PASSWORD` from single IP (brute force)
+- Unusual access patterns outside business hours
+</Step>
+
+<Step title="Privacy Compliance">
+Ensure IP address storage complies with GDPR/privacy regulations. Consider IP anonymization for non-security use cases.
+</Step>
+
+</Steps>
+
+<Warning>
+Audit logs may contain sensitive information (IP addresses, access patterns). Implement appropriate access controls and data retention policies.
+</Warning>
+
+## Metrics Integration
+
+The audit system integrates with Micrometer for real-time metrics:
+
+```java ResolveLinkServiceImpl.java:53-55
+Counter.builder("secure_link_resolve_attempts_total")
+  .register(meterRegistry)
+  .increment();
+```
+
+```java ResolveLinkServiceImpl.java:61-64
+Counter.builder("secure_link_resolve_denied_total")
+  .tag("reason", "not_found")
+  .register(meterRegistry)
+  .increment();
+```
+
+Metrics are exposed via `/actuator/prometheus` for monitoring systems.
+
+## Next Steps
+
+<CardGroup cols={2}>
+
+<Card title="Statistics API" icon="chart-bar" href="/api/stats/access-summary">
+Explore the complete statistics and analytics API
+</Card>
+
+<Card title="Access Control" icon="shield-check" href="/concepts/access-control">
+Learn about validation flow and security constraints
+</Card>
+
+</CardGroup>

@@ -1,0 +1,394 @@
+---
+title: "Link Revocation"
+description: "Learn how to manually revoke links before they expire"
+---
+
+## Overview
+
+Link revocation allows you to immediately disable access to a link, regardless of its expiration settings. This is useful when:
+
+- Content needs to be removed urgently
+- A link was shared with unintended recipients
+- Security concerns require immediate access termination
+- A password has been compromised
+- You need to rotate or update content
+
+## Revoking a Link
+
+To revoke a link, send a DELETE request to `/l/{shortCode}`:
+
+<CodeGroup>
+```bash cURL
+curl -X DELETE http://localhost:8080/l/abc123
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:8080/l/abc123', {
+  method: 'DELETE'
+});
+
+if (response.status === 204) {
+  console.log('Link revoked successfully');
+}
+```
+
+```python Python
+import requests
+
+response = requests.delete('http://localhost:8080/l/abc123')
+
+if response.status_code == 204:
+    print('Link revoked successfully')
+```
+</CodeGroup>
+
+### Success Response
+
+When revocation succeeds, you receive a 204 No Content response with an empty body:
+
+```
+HTTP/1.1 204 No Content
+```
+
+<Note>
+  A 204 status code indicates the link was successfully revoked. No response body is returned.
+</Note>
+
+## Revocation Implementation
+
+The revocation endpoint is defined in RevokeLinkController:
+
+```java
+@DeleteMapping("/l/{shortCode}")
+@ResponseStatus(HttpStatus.NO_CONTENT)
+public void revoke(@PathVariable String shortCode){
+  revokeLinkService.revoke(shortCode);
+}
+```
+
+The service marks the link as revoked in the database and prevents all future access.
+
+## Accessing a Revoked Link
+
+Once revoked, any attempt to access the link will fail:
+
+```bash
+curl -L http://localhost:8080/l/abc123
+```
+
+Response (410 Gone):
+```json
+{
+  "timestamp": "2026-03-04T14:30:00Z",
+  "status": 410,
+  "error": "Gone",
+  "message": "Link access denied",
+  "path": "/l/abc123"
+}
+```
+
+<Warning>
+  Revocation is permanent and cannot be undone. Once a link is revoked, it cannot be reactivated. You must create a new link if access needs to be restored.
+</Warning>
+
+## Revocation Validation
+
+From ResolveLinkServiceImpl:71-73, revocation is checked first:
+
+```java
+if (link.isRevoked()) {
+  handleDenied(link.getShortCode(), AccessResult.REVOKED, "revoked", context);
+}
+```
+
+This check occurs **before** all other validations (expiration, password, view limits), ensuring revoked links are immediately inaccessible.
+
+## Error Handling
+
+### Link Not Found
+
+If the short code doesn't exist:
+
+```bash
+curl -X DELETE http://localhost:8080/l/invalid123
+```
+
+Response (404 Not Found):
+```json
+{
+  "timestamp": "2026-03-04T14:30:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Link not found",
+  "path": "/l/invalid123"
+}
+```
+
+### Already Revoked
+
+Revoking an already-revoked link typically returns 204 No Content (idempotent operation). The link remains in the revoked state.
+
+## Complete Workflow Example
+
+<Steps>
+  <Step title="Create a link">
+    ```bash
+    curl -X POST http://localhost:8080/api/links \
+      -H "Content-Type: application/json" \
+      -d '{
+        "targetUrl": "https://example.com/content",
+        "expiresAt": "2027-12-31T23:59:59Z"
+      }'
+    ```
+
+    Response:
+    ```json
+    {
+      "shortCode": "abc123",
+      "accessUrl": "http://localhost:8080/l/abc123",
+      "expiresAt": "2027-12-31T23:59:59Z",
+      "maxViews": null
+    }
+    ```
+
+    **Important**: Save the `shortCode` value for later revocation.
+  </Step>
+
+  <Step title="Verify link is accessible">
+    ```bash
+    curl -L http://localhost:8080/l/abc123
+    ```
+
+    Expected: 302 redirect to https://example.com/content
+  </Step>
+
+  <Step title="Revoke the link">
+    ```bash
+    curl -X DELETE http://localhost:8080/l/abc123
+    ```
+
+    Expected: 204 No Content
+  </Step>
+
+  <Step title="Verify link is now inaccessible">
+    ```bash
+    curl -L http://localhost:8080/l/abc123
+    ```
+
+    Expected: 410 Gone with "Link access denied"
+  </Step>
+</Steps>
+
+## Use Cases
+
+### Emergency Content Removal
+
+```bash
+# Create link for a document
+curl -X POST http://localhost:8080/api/links/upload \
+  -F "file=@quarterly-report.pdf" \
+  -F "expiresAt=2026-12-31T23:59:59Z"
+
+# Later: Document contains error, must be removed immediately
+curl -X DELETE http://localhost:8080/l/xyz789
+```
+
+### Compromised Password
+
+```bash
+# Original password-protected link
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetUrl": "https://example.com/secure",
+    "password": "OldPassword123",
+    "expiresAt": "2026-12-31T23:59:59Z"
+  }'
+
+# Password leaked - revoke immediately
+curl -X DELETE http://localhost:8080/l/abc123
+
+# Create new link with new password
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetUrl": "https://example.com/secure",
+    "password": "NewSecurePassword456",
+    "expiresAt": "2026-12-31T23:59:59Z"
+  }'
+```
+
+### Content Rotation
+
+```bash
+# Revoke old version
+curl -X DELETE http://localhost:8080/l/old123
+
+# Upload new version
+curl -X POST http://localhost:8080/api/links/upload \
+  -F "file=@updated-document-v2.pdf" \
+  -F "expiresAt=2026-12-31T23:59:59Z"
+```
+
+### Accidental Share
+
+```bash
+# Link accidentally shared in public channel
+curl -X DELETE http://localhost:8080/l/abc123
+
+# Create new link and share privately
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetUrl": "https://example.com/private-content",
+    "password": "SecurePassword789",
+    "maxViews": 10
+  }'
+```
+
+## Audit Trail
+
+All access attempts to revoked links are logged in the audit system with `AccessResult.REVOKED`. This helps track:
+
+- When the link was revoked
+- Who attempted to access it after revocation
+- How many attempts were made
+
+Check the audit logs or statistics endpoints for detailed information.
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Store shortCodes securely" icon="database">
+    To enable revocation, you must store the `shortCode` value when creating links. Store it in your database with appropriate access controls.
+    
+    ```javascript
+    // Example: Store in database
+    const response = await createLink({
+      targetUrl: 'https://example.com/content',
+      expiresAt: '2026-12-31T23:59:59Z'
+    });
+    
+    await db.links.insert({
+      shortCode: response.shortCode,
+      accessUrl: response.accessUrl,
+      createdAt: new Date(),
+      purpose: 'Q4 Marketing Campaign'
+    });
+    ```
+  </Accordion>
+
+  <Accordion title="Implement revocation APIs" icon="code">
+    If you're building a user-facing application, expose revocation functionality through your UI:
+    
+    - **Admin panel**: Allow administrators to revoke any link
+    - **User dashboard**: Let users revoke their own links
+    - **Automatic revocation**: Implement triggers for suspicious activity
+  </Accordion>
+
+  <Accordion title="Document revocation policies" icon="book">
+    Clearly communicate to users:
+    - Who can revoke links
+    - Whether revocation is reversible (it's not)
+    - What happens to users who try to access revoked links
+    - How to create replacement links
+  </Accordion>
+
+  <Accordion title="Monitor revocation patterns" icon="chart-line">
+    Track revocation metrics:
+    - How many links are revoked manually vs. auto-expired
+    - Average time between creation and revocation
+    - Common reasons for revocation
+    
+    This helps identify issues like:
+    - Frequent password compromises
+    - Incorrect expiration settings
+    - User confusion about link management
+  </Accordion>
+
+  <Accordion title="Notify affected users" icon="bell">
+    If possible, notify users when a link they have access to is revoked:
+    
+    ```javascript
+    // Example: Send notification after revocation
+    await revokeLink('abc123');
+    
+    await sendEmail({
+      to: affectedUsers,
+      subject: 'Content Access Revoked',
+      body: 'The link you received has been revoked. Please contact support for the updated link.'
+    });
+    ```
+  </Accordion>
+
+  <Accordion title="Use revocation over deletion" icon="shield">
+    The API marks links as revoked rather than deleting them. This preserves:
+    - Audit trails for compliance
+    - Statistics and analytics
+    - Historical access attempts
+    
+    Follow this pattern in your own data retention policies.
+  </Accordion>
+</AccordionGroup>
+
+## Revocation vs. Expiration
+
+| Feature | Revocation | Expiration |
+|---------|-----------|------------|
+| **Trigger** | Manual API call | Automatic (time or views) |
+| **Timing** | Immediate | Scheduled or on view limit |
+| **Reversible** | No | No |
+| **Use case** | Emergency removal | Planned lifecycle |
+| **Audit result** | `REVOKED` | `EXPIRED` or `VIEW_LIMIT_REACHED` |
+
+<Note>
+  Both revocation and expiration result in the same user experience (410 Gone), but they serve different purposes and are tracked separately in audit logs.
+</Note>
+
+## Security Considerations
+
+### Access Control
+
+The current API doesn't require authentication for revocation. In production, you should:
+
+1. **Add authentication**: Require API keys or OAuth tokens
+2. **Implement authorization**: Verify the requester owns the link
+3. **Rate limiting**: Prevent abuse of the revocation endpoint
+4. **Audit logging**: Log who revoked which links and when
+
+### Example: Protected Revocation Endpoint
+
+```bash
+# With authentication
+curl -X DELETE http://localhost:8080/l/abc123 \
+  -H "Authorization: Bearer your-api-token"
+```
+
+### Prevention of Enumeration Attacks
+
+To prevent attackers from discovering valid short codes:
+
+- Return consistent responses for revoked/expired/not-found links
+- Implement rate limiting on the revocation endpoint
+- Monitor for suspicious patterns (many failed revocation attempts)
+- Use longer, more complex short codes
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Link Expiration" icon="clock" href="/guides/link-expiration">
+    Learn about automatic expiration options
+  </Card>
+
+  <Card title="Creating Links" icon="link" href="/guides/creating-links">
+    Understand all link creation options
+  </Card>
+
+  <Card title="Security Metrics" icon="shield" href="/api/stats/security-metrics">
+    Monitor revocation and access patterns
+  </Card>
+
+  <Card title="Access Summary" icon="chart-bar" href="/api/stats/access-summary">
+    View statistics on revoked links
+  </Card>
+</CardGroup>

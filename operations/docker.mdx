@@ -1,0 +1,484 @@
+---
+title: 'Docker Deployment'
+description: 'Deploy Secure Link API using Docker and docker-compose'
+icon: 'docker'
+---
+
+## Overview
+
+Secure Link API can be deployed using Docker for both development and production environments. The project includes a `docker-compose.yml` file for easy MySQL setup.
+
+## Prerequisites
+
+- **Docker** 20.10+
+- **Docker Compose** 2.0+
+
+## Quick Start with Docker Compose
+
+The provided `docker-compose.yml` sets up MySQL 8.4 with the required configuration.
+
+<Steps>
+  <Step title="Configure Environment Variables">
+    Create a `.env` file in the `backend/` directory:
+
+    ```bash
+    cd backend
+    cp .env.example .env
+    ```
+
+    Edit the `.env` file:
+
+    ```properties .env
+    BASE_URL=http://localhost:8080
+    DB_HOST=localhost
+    DB_PORT=3307
+    DB_NAME=secure_link
+    DB_USERNAME=your_username
+    DB_PASSWORD=your_password
+    ```
+  </Step>
+
+  <Step title="Start MySQL Container">
+    Launch the MySQL container using docker-compose:
+
+    ```bash
+    docker-compose up -d
+    ```
+
+    This will:
+    - Pull MySQL 8.4.8 image
+    - Create a persistent volume for data
+    - Configure the database with UTF-8 support
+    - Expose MySQL on port 3307
+  </Step>
+
+  <Step title="Verify MySQL is Running">
+    Check the container status:
+
+    ```bash
+    docker-compose ps
+    ```
+
+    Expected output:
+    ```
+    NAME                  IMAGE            STATUS          PORTS
+    secure-link-mysql     mysql:8.4.8      Up 10 seconds   0.0.0.0:3307->3306/tcp
+    ```
+
+    Test the connection:
+
+    ```bash
+    docker exec -it secure-link-mysql mysql -u your_username -p
+    ```
+  </Step>
+
+  <Step title="Run the Application">
+    With MySQL running, start the Spring Boot application:
+
+    ```bash
+    SPRING_PROFILES_ACTIVE=dev mvn spring-boot:run
+    ```
+
+    The application will connect to the MySQL container and apply Flyway migrations automatically.
+  </Step>
+</Steps>
+
+## Docker Compose Configuration
+
+Here's the complete `docker-compose.yml` configuration:
+
+```yaml docker-compose.yml
+services:
+  mysql:
+    image: mysql:8.4.8
+    container_name: secure-link-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: root
+      TZ: America/Sao_Paulo
+
+    ports:
+      - "${DB_PORT}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --log-timestamps=SYSTEM
+
+volumes:
+  mysql_data:
+```
+
+### Configuration Details
+
+| Setting | Description |
+|---------|-------------|
+| `image: mysql:8.4.8` | Official MySQL 8.4 image |
+| `restart: unless-stopped` | Auto-restart container on failure |
+| `MYSQL_DATABASE` | Creates database on first run |
+| `MYSQL_USER/PASSWORD` | Application database user |
+| `MYSQL_ROOT_PASSWORD` | Root password (not used by app) |
+| `TZ: America/Sao_Paulo` | Container timezone |
+| `mysql_data` volume | Persistent storage for database |
+| `--character-set-server=utf8mb4` | UTF-8 support for international characters |
+
+## Containerizing the Application
+
+To run the entire application in Docker, create a `Dockerfile`:
+
+```dockerfile Dockerfile
+# Build stage
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /app
+
+# Copy pom.xml and download dependencies
+COPY pom.xml .
+RUN mvn dependency:go-offline
+
+# Copy source and build
+COPY src ./src
+RUN mvn clean package -DskipTests
+
+# Runtime stage
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+
+# Copy JAR from build stage
+COPY --from=build /app/target/*.jar app.jar
+
+# Create upload directory
+RUN mkdir -p /tmp/uploads
+
+# Expose port
+EXPOSE 8080
+
+# Run application
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
+
+### Build and Run
+
+```bash
+# Build the image
+docker build -t secure-link-api:latest .
+
+# Run the container
+docker run -d \
+  --name secure-link-api \
+  -p 8080:8080 \
+  -e SPRING_PROFILES_ACTIVE=prod \
+  -e DB_URL=jdbc:mysql://mysql:3306/secure_link \
+  -e DB_USERNAME=your_username \
+  -e DB_PASSWORD=your_password \
+  -e BASE_URL=http://localhost:8080 \
+  --network secure-link-network \
+  secure-link-api:latest
+```
+
+## Full Stack Docker Compose
+
+For a complete deployment with both MySQL and the application:
+
+```yaml docker-compose.full.yml
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.4.8
+    container_name: secure-link-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      TZ: America/Sao_Paulo
+    ports:
+      - "${DB_PORT}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - secure-link-network
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --log-timestamps=SYSTEM
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: secure-link-api
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: jdbc:mysql://mysql:3306/${DB_NAME}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      BASE_URL: ${BASE_URL}
+    ports:
+      - "8080:8080"
+    volumes:
+      - uploads:/tmp/uploads
+    networks:
+      - secure-link-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
+  uploads:
+
+networks:
+  secure-link-network:
+    driver: bridge
+```
+
+### Launch Full Stack
+
+```bash
+# Start all services
+docker-compose -f docker-compose.full.yml up -d
+
+# View logs
+docker-compose -f docker-compose.full.yml logs -f
+
+# Stop all services
+docker-compose -f docker-compose.full.yml down
+
+# Stop and remove volumes (WARNING: deletes data)
+docker-compose -f docker-compose.full.yml down -v
+```
+
+## Docker Commands Reference
+
+### Container Management
+
+<CodeGroup>
+
+```bash Start Services
+docker-compose up -d
+```
+
+```bash Stop Services
+docker-compose down
+```
+
+```bash View Logs
+docker-compose logs -f
+```
+
+```bash Restart Services
+docker-compose restart
+```
+
+</CodeGroup>
+
+### Database Operations
+
+<CodeGroup>
+
+```bash MySQL Shell
+docker exec -it secure-link-mysql mysql -u root -p
+```
+
+```bash Database Backup
+docker exec secure-link-mysql mysqldump -u root -p secure_link > backup.sql
+```
+
+```bash Database Restore
+docker exec -i secure-link-mysql mysql -u root -p secure_link < backup.sql
+```
+
+```bash View MySQL Logs
+docker logs secure-link-mysql
+```
+
+</CodeGroup>
+
+### Application Container
+
+<CodeGroup>
+
+```bash View App Logs
+docker logs -f secure-link-api
+```
+
+```bash Execute Shell
+docker exec -it secure-link-api /bin/bash
+```
+
+```bash Restart App
+docker restart secure-link-api
+```
+
+</CodeGroup>
+
+## Volume Management
+
+### List Volumes
+
+```bash
+docker volume ls
+```
+
+### Inspect Volume
+
+```bash
+docker volume inspect backend_mysql_data
+```
+
+### Backup Volume
+
+```bash
+docker run --rm \
+  -v backend_mysql_data:/data \
+  -v $(pwd):/backup \
+  ubuntu tar czf /backup/mysql_backup.tar.gz /data
+```
+
+### Restore Volume
+
+```bash
+docker run --rm \
+  -v backend_mysql_data:/data \
+  -v $(pwd):/backup \
+  ubuntu tar xzf /backup/mysql_backup.tar.gz -C /
+```
+
+## Production Deployment
+
+### Environment Variables for Production
+
+```properties .env.production
+BASE_URL=https://api.example.com
+DB_PORT=3306
+DB_NAME=secure_link_prod
+DB_USERNAME=prod_user
+DB_PASSWORD=strong_secure_password_here
+DB_ROOT_PASSWORD=another_strong_password
+```
+
+<Warning>
+  **Production Security:**
+  - Use strong, randomly generated passwords
+  - Don't expose MySQL port publicly (remove `ports` section)
+  - Enable HTTPS/TLS for the application
+  - Use Docker secrets for sensitive data
+  - Regularly update Docker images
+</Warning>
+
+### Docker Secrets (Swarm Mode)
+
+For enhanced security in production:
+
+```yaml
+services:
+  app:
+    secrets:
+      - db_password
+    environment:
+      DB_PASSWORD_FILE: /run/secrets/db_password
+
+secrets:
+  db_password:
+    external: true
+```
+
+### Health Checks
+
+Monitor container health:
+
+```yaml
+app:
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 40s
+```
+
+## Resource Limits
+
+Set resource constraints:
+
+```yaml
+services:
+  app:
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+```
+
+## Troubleshooting
+
+### MySQL Connection Failed
+
+```bash
+# Check MySQL is running
+docker-compose ps
+
+# Check MySQL logs
+docker logs secure-link-mysql
+
+# Verify network
+docker network inspect backend_default
+```
+
+### Application Won't Start
+
+```bash
+# Check application logs
+docker logs secure-link-api
+
+# Verify environment variables
+docker exec secure-link-api env
+
+# Check health endpoint
+curl http://localhost:8080/actuator/health
+```
+
+### Port Conflicts
+
+If port 3307 is in use:
+
+```yaml
+ports:
+  - "3308:3306"  # Change host port
+```
+
+Update `.env`:
+```
+DB_PORT=3308
+```
+
+### Data Persistence Issues
+
+```bash
+# Verify volume exists
+docker volume inspect backend_mysql_data
+
+# Check volume mount
+docker inspect secure-link-mysql | grep Mounts -A 10
+```
+
+## Next Steps
+
+- [Configure the application](/operations/configuration) for your environment
+- [Install locally](/operations/installation) for development
+- Review [API Reference](/api/links/create) for usage

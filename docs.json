@@ -1,122 +1,111 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Secure Link API",
+  "theme": "sequoia",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#7c7c80",
+    "light": "#151c28",
+    "dark": "#f2f2f2"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "https://media.brand.dev/ed1ea708-4249-4d42-9233-93fde61f32fc.jpg",
+  "logo": {
+    "light": "https://media.brand.dev/ed1ea708-4249-4d42-9233-93fde61f32fc.jpg",
+    "dark": "https://media.brand.dev/ed1ea708-4249-4d42-9233-93fde61f32fc.jpg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/WalysonGomes/secure-link-api"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/WalysonGomes/secure-link-api"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "quickstart"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/secure-links",
+              "concepts/access-control",
+              "concepts/audit-tracking"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Guides",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
-            ]
-          },
-          {
-            "group": "AI tools",
-            "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "guides/creating-links",
+              "guides/uploading-files",
+              "guides/password-protection",
+              "guides/link-expiration",
+              "guides/revocation"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Overview",
             "pages": [
-              "api-reference/introduction"
+              "api/overview",
+              "api/authentication",
+              "api/error-handling"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Links",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/links/create",
+              "api/links/upload",
+              "api/links/resolve",
+              "api/links/revoke"
+            ]
+          },
+          {
+            "group": "Statistics",
+            "pages": [
+              "api/stats/overview",
+              "api/stats/access-summary",
+              "api/stats/security-metrics"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Operations",
+        "groups": [
+          {
+            "group": "Deployment",
+            "pages": [
+              "operations/installation",
+              "operations/configuration",
+              "operations/docker"
+            ]
+          },
+          {
+            "group": "Monitoring",
+            "pages": [
+              "operations/health-checks",
+              "operations/metrics",
+              "operations/observability"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

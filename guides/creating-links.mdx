@@ -1,0 +1,218 @@
+---
+title: "Creating Links"
+description: "Learn how to create secure links for external URLs"
+---
+
+## Overview
+
+Secure Link API allows you to create shortened, trackable links for any external URL. This guide walks you through creating links with various configuration options.
+
+## Basic Link Creation
+
+To create a basic link without expiration or view limits:
+
+<Steps>
+  <Step title="Prepare the request">
+    Create a POST request to `/api/links` with the target URL:
+
+    <CodeGroup>
+    ```bash cURL
+    curl -X POST http://localhost:8080/api/links \
+      -H "Content-Type: application/json" \
+      -d '{
+        "targetUrl": "https://example.com/destination"
+      }'
+    ```
+
+    ```javascript JavaScript
+    const response = await fetch('http://localhost:8080/api/links', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        targetUrl: 'https://example.com/destination'
+      })
+    });
+
+    const link = await response.json();
+    console.log(link.accessUrl);
+    ```
+
+    ```python Python
+    import requests
+
+    response = requests.post(
+        'http://localhost:8080/api/links',
+        json={'targetUrl': 'https://example.com/destination'}
+    )
+
+    link = response.json()
+    print(link['accessUrl'])
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Receive the response">
+    The API returns a 201 Created response with the link details:
+
+    ```json
+    {
+      "shortCode": "abc123",
+      "accessUrl": "http://localhost:8080/l/abc123",
+      "expiresAt": null,
+      "maxViews": null
+    }
+    ```
+
+    <Note>
+      The `shortCode` is a unique identifier generated for each link. Save this value if you need to revoke the link later.
+    </Note>
+  </Step>
+
+  <Step title="Share the link">
+    Use the `accessUrl` to share with your users. When accessed, it will redirect to the target URL.
+  </Step>
+</Steps>
+
+## Request Parameters
+
+The `CreateLinkRequestDto` accepts the following parameters:
+
+| Parameter | Type | Required | Validation | Description |
+|-----------|------|----------|------------|-------------|
+| `targetUrl` | string | Yes | Must be a valid URL | The destination URL to redirect to |
+| `expiresAt` | string (ISO 8601) | No | Must be a future date/time | When the link should expire |
+| `maxViews` | integer | No | Must be positive | Maximum number of times the link can be accessed |
+| `password` | string | No | - | Optional password protection (see [Password Protection](/guides/password-protection)) |
+
+## Advanced Examples
+
+### Creating a Link with Expiration
+
+Set an expiration date using ISO 8601 format with timezone offset:
+
+```bash
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetUrl": "https://example.com/limited-offer",
+    "expiresAt": "2026-12-31T23:59:59+00:00"
+  }'
+```
+
+<Warning>
+  The `expiresAt` value must be in the future. Past dates will be rejected with a validation error.
+</Warning>
+
+### Creating a Link with View Limit
+
+Limit how many times a link can be accessed:
+
+```bash
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetUrl": "https://example.com/exclusive",
+    "maxViews": 100
+  }'
+```
+
+### Combining Multiple Options
+
+You can combine expiration, view limits, and password protection:
+
+```bash
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetUrl": "https://example.com/secure-content",
+    "expiresAt": "2026-06-30T23:59:59+00:00",
+    "maxViews": 50,
+    "password": "secret123"
+  }'
+```
+
+## Error Handling
+
+### Validation Errors
+
+If validation fails, you'll receive a 400 Bad Request response:
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "targetUrl: must be a valid URL",
+  "path": "/api/links"
+}
+```
+
+Common validation errors:
+
+- `targetUrl: must not be blank` - The targetUrl field is required
+- `targetUrl: must be a valid URL` - The URL format is invalid
+- `expiresAt: must be a future date` - The expiration date is in the past
+- `maxViews: must be greater than 0` - The maxViews must be a positive number
+
+### Server Errors
+
+For unexpected errors, you'll receive a 500 Internal Server Error with a reference ID:
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00Z",
+  "status": 500,
+  "error": "Internal Server Error",
+  "message": "An unexpected error occurred. Reference ID: 550e8400-e29b-41d4-a716-446655440000",
+  "path": "/api/links"
+}
+```
+
+<Note>
+  Use the Reference ID when reporting issues to support for faster troubleshooting.
+</Note>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Validate URLs before submission">
+    Always validate that your target URLs are properly formatted and accessible before creating links. This prevents user confusion when links fail to resolve.
+  </Accordion>
+
+  <Accordion title="Use appropriate expiration times">
+    Set expiration times based on your use case:
+    - Marketing campaigns: Match the campaign end date
+    - Temporary shares: 24-48 hours
+    - Long-term redirects: Consider no expiration
+  </Accordion>
+
+  <Accordion title="Store shortCodes securely">
+    If you need to revoke links later, store the `shortCode` value securely in your database with appropriate access controls.
+  </Accordion>
+
+  <Accordion title="Monitor view counts">
+    For links with `maxViews` set, monitor access patterns to detect if the limit is too restrictive or too permissive.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Upload Files" icon="upload" href="/guides/uploading-files">
+    Learn how to create download links for uploaded files
+  </Card>
+
+  <Card title="Password Protection" icon="lock" href="/guides/password-protection">
+    Secure your links with password protection
+  </Card>
+
+  <Card title="Link Expiration" icon="clock" href="/guides/link-expiration">
+    Configure expiration and time-to-live settings
+  </Card>
+
+  <Card title="Revocation" icon="ban" href="/guides/revocation">
+    Manually revoke links before expiration
+  </Card>
+</CardGroup>

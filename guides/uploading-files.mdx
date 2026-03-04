@@ -1,0 +1,272 @@
+---
+title: "Uploading Files"
+description: "Learn how to upload files and generate secure download links"
+---
+
+## Overview
+
+The Upload API allows you to upload files and generate secure download links with expiration, view limits, and password protection. Files are stored on the server and accessed through temporary secure links.
+
+## Basic File Upload
+
+Upload a file and receive a download link:
+
+<Steps>
+  <Step title="Prepare the multipart request">
+    Create a POST request to `/api/links/upload` with the file as multipart/form-data:
+
+    <CodeGroup>
+    ```bash cURL
+    curl -X POST http://localhost:8080/api/links/upload \
+      -F "file=@/path/to/document.pdf"
+    ```
+
+    ```javascript JavaScript
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+
+    const response = await fetch('http://localhost:8080/api/links/upload', {
+      method: 'POST',
+      body: formData
+    });
+
+    const link = await response.json();
+    console.log(link.accessUrl);
+    ```
+
+    ```python Python
+    import requests
+
+    files = {'file': open('document.pdf', 'rb')}
+    response = requests.post(
+        'http://localhost:8080/api/links/upload',
+        files=files
+    )
+
+    link = response.json()
+    print(link['accessUrl'])
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Receive the response">
+    The API returns a 201 Created response:
+
+    ```json
+    {
+      "shortCode": "xyz789",
+      "accessUrl": "http://localhost:8080/l/xyz789",
+      "expiresAt": null,
+      "maxViews": null
+    }
+    ```
+  </Step>
+
+  <Step title="Share the download link">
+    When users access the `accessUrl`, the file will be downloaded with the original filename.
+  </Step>
+</Steps>
+
+## Request Parameters
+
+The `LinkUploadRequestDto` accepts the following form fields:
+
+| Parameter | Type | Required | Validation | Description |
+|-----------|------|----------|------------|-------------|
+| `file` | file | Yes | Must not be null | The file to upload |
+| `expiresAt` | string (ISO 8601) | No | Must be a future date/time | When the download link should expire |
+| `maxViews` | integer | No | Must be positive | Maximum number of downloads allowed |
+| `password` | string | No | - | Optional password protection |
+
+<Note>
+  All parameters except `file` are optional. The file is uploaded as multipart/form-data.
+</Note>
+
+## Advanced Examples
+
+### Upload with Expiration
+
+Create a download link that expires after a specific date:
+
+```bash
+curl -X POST http://localhost:8080/api/links/upload \
+  -F "file=@confidential-report.pdf" \
+  -F "expiresAt=2026-03-31T23:59:59+00:00"
+```
+
+### Limited Downloads
+
+Allow only a certain number of downloads:
+
+```bash
+curl -X POST http://localhost:8080/api/links/upload \
+  -F "file=@presentation.pptx" \
+  -F "maxViews=10"
+```
+
+<Warning>
+  Once the view limit is reached, the link will automatically expire and cannot be accessed again.
+</Warning>
+
+### Password-Protected Upload
+
+Require a password for downloading:
+
+```bash
+curl -X POST http://localhost:8080/api/links/upload \
+  -F "file=@sensitive-data.xlsx" \
+  -F "password=SecurePass123"
+```
+
+Users will need to provide the password via the `X-Link-Password` header when accessing the link. See [Password Protection](/guides/password-protection) for details.
+
+### Complete Example with All Options
+
+Combine expiration, download limits, and password protection:
+
+<CodeGroup>
+```bash cURL
+curl -X POST http://localhost:8080/api/links/upload \
+  -F "file=@contract.pdf" \
+  -F "expiresAt=2026-12-31T23:59:59+00:00" \
+  -F "maxViews=5" \
+  -F "password=contract2026"
+```
+
+```javascript JavaScript
+const formData = new FormData();
+formData.append('file', fileInput.files[0]);
+formData.append('expiresAt', '2026-12-31T23:59:59+00:00');
+formData.append('maxViews', '5');
+formData.append('password', 'contract2026');
+
+const response = await fetch('http://localhost:8080/api/links/upload', {
+  method: 'POST',
+  body: formData
+});
+```
+
+```python Python
+import requests
+
+files = {'file': open('contract.pdf', 'rb')}
+data = {
+    'expiresAt': '2026-12-31T23:59:59+00:00',
+    'maxViews': '5',
+    'password': 'contract2026'
+}
+
+response = requests.post(
+    'http://localhost:8080/api/links/upload',
+    files=files,
+    data=data
+)
+```
+</CodeGroup>
+
+## File Download Behavior
+
+When a user accesses a file download link:
+
+1. The server validates access permissions (password, expiration, view count)
+2. If valid, the file is returned with `Content-Disposition: attachment` header
+3. The browser prompts the user to download the file with its original filename
+4. The view count is incremented
+
+### Example Download Request
+
+```bash
+curl -L http://localhost:8080/l/xyz789 \
+  -H "X-Link-Password: contract2026" \
+  -o downloaded-file.pdf
+```
+
+<Note>
+  The `-L` flag tells curl to follow redirects. The `-o` flag specifies the output filename.
+</Note>
+
+## Error Handling
+
+### File Validation Errors
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "file: must not be null",
+  "path": "/api/links/upload"
+}
+```
+
+### File Not Found on Download
+
+If the file was deleted from the server:
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "File not found",
+  "path": "/l/xyz789"
+}
+```
+
+### Access Denied Errors
+
+See [Password Protection](/guides/password-protection) and [Link Expiration](/guides/link-expiration) for access control error responses.
+
+## Storage Considerations
+
+<AccordionGroup>
+  <Accordion title="File size limits" icon="hard-drive">
+    Check your server configuration for maximum file upload size. By default, Spring Boot allows up to 1MB. You may need to configure `spring.servlet.multipart.max-file-size` and `spring.servlet.multipart.max-request-size` for larger files.
+  </Accordion>
+
+  <Accordion title="File retention" icon="clock">
+    Uploaded files are stored on the server until:
+    - The link expires (if `expiresAt` is set)
+    - The link is manually revoked
+    - A cleanup process removes expired files
+    
+    Plan your storage capacity accordingly.
+  </Accordion>
+
+  <Accordion title="File naming" icon="file">
+    Original filenames are preserved and returned in the `Content-Disposition` header during download. Ensure filenames don't contain special characters that might cause issues.
+  </Accordion>
+
+  <Accordion title="Security" icon="shield">
+    Files are stored on the server filesystem. Ensure proper file system permissions are set to prevent unauthorized access. Consider encrypting sensitive files at rest.
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+- **Use expiration for all uploads**: Set reasonable expiration times to prevent indefinite storage
+- **Limit download counts**: For sensitive files, use `maxViews` to control distribution
+- **Validate file types**: Implement client-side validation before upload to improve UX
+- **Monitor storage usage**: Track uploaded file sizes and implement cleanup policies
+- **Use passwords for sensitive data**: Always password-protect confidential documents
+- **Communicate limits to users**: Let users know expiration dates and download limits
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Password Protection" icon="lock" href="/guides/password-protection">
+    Secure file downloads with passwords
+  </Card>
+
+  <Card title="Link Expiration" icon="clock" href="/guides/link-expiration">
+    Configure when download links expire
+  </Card>
+
+  <Card title="Creating Links" icon="link" href="/guides/creating-links">
+    Create links for external URLs
+  </Card>
+
+  <Card title="Revocation" icon="ban" href="/guides/revocation">
+    Manually revoke download links
+  </Card>
+</CardGroup>

@@ -1,0 +1,520 @@
+---
+title: 'Resolve Link'
+description: 'Access a secure link and retrieve the target URL or download a file'
+---
+
+## Endpoint
+
+<Note>
+  This endpoint resolves a secure link using its short code. It validates access conditions (expiration, view limits, password) and either redirects to the target URL or returns file content.
+</Note>
+
+```http
+GET /l/{shortCode}
+```
+
+## Path Parameters
+
+<ParamField path="shortCode" type="string" required>
+  The unique 8-character identifier for the secure link.
+  
+  **Format:** Alphanumeric string (case-sensitive)
+  
+  **Example:** `K2x9pLmN`
+</ParamField>
+
+## Headers
+
+<ParamField header="X-Link-Password" type="string">
+  Password required to access password-protected links.
+  
+  **When Required:**
+  - Only needed if the link was created with a password
+  - Returns 401 Unauthorized if missing or incorrect
+  
+  **Example:** `mySecurePassword123`
+</ParamField>
+
+<ParamField header="Accept" type="string">
+  Controls response format for redirect links.
+  
+  **Behavior:**
+  - `application/json`: Returns JSON with redirect URL (status 200)
+  - Any other value or not set: Returns HTTP 302 redirect
+  
+  **Note:** Only applies to `REDIRECT` type links, not file downloads
+  
+  **Example:** `application/json`
+</ParamField>
+
+<ParamField header="User-Agent" type="string">
+  Client user agent string (automatically sent by browsers).
+  
+  **Purpose:**
+  - Captured for audit logging
+  - Helps track access patterns and detect suspicious activity
+  
+  **Example:** `Mozilla/5.0 (Windows NT 10.0; Win64; x64)...`
+</ParamField>
+
+## Response Types
+
+### Redirect Link (HTTP 302)
+
+For `REDIRECT` type links without `Accept: application/json` header:
+
+<ResponseField name="Status" type="302 Found">
+  Client is redirected to the target URL.
+</ResponseField>
+
+<ResponseField name="Location" type="header">
+  Contains the target URL for redirection.
+  
+  **Example:** `https://example.com/document.pdf`
+</ResponseField>
+
+### Redirect Link (JSON)
+
+For `REDIRECT` type links with `Accept: application/json` header:
+
+<ResponseField name="type" type="string">
+  Always "REDIRECT" for redirect links.
+</ResponseField>
+
+<ResponseField name="targetUrl" type="string">
+  The destination URL.
+  
+  **Example:** `https://example.com/document.pdf`
+</ResponseField>
+
+### File Download
+
+For `DOWNLOAD` type links (created via file upload):
+
+<ResponseField name="Status" type="200 OK">
+  File content is returned in the response body.
+</ResponseField>
+
+<ResponseField name="Content-Disposition" type="header">
+  Specifies the original filename for download.
+  
+  **Format:** `attachment; filename="original-name.pdf"`
+  
+  **Example:** `attachment; filename="report-2024.xlsx"`
+</ResponseField>
+
+<ResponseField name="Content-Type" type="header">
+  Set to `application/octet-stream` for binary file downloads.
+</ResponseField>
+
+<ResponseField name="Body" type="binary">
+  Raw file content as a resource stream.
+</ResponseField>
+
+## Status Codes
+
+<ResponseField name="200" type="OK">
+  **For JSON requests:** Successfully resolved redirect link, JSON response returned.
+  
+  **For file downloads:** File content returned successfully.
+</ResponseField>
+
+<ResponseField name="302" type="Found">
+  **For redirect links:** Client is being redirected to the target URL.
+  
+  **Access tracking:** This access is recorded as successful in audit logs.
+</ResponseField>
+
+<ResponseField name="401" type="Unauthorized">
+  Password authentication failed. Possible causes:
+  
+  **PASSWORD_REQUIRED:**
+  - Link requires a password but `X-Link-Password` header was not provided
+  - Error message: "Password required"
+  
+  **INVALID_PASSWORD:**
+  - Password provided in `X-Link-Password` header is incorrect
+  - Error message: "Invalid password"
+  
+  **Access tracking:** Failed access attempts are recorded with the specific failure reason.
+</ResponseField>
+
+<ResponseField name="404" type="Not Found">
+  Link does not exist or file is missing. Possible causes:
+  
+  **NOT_FOUND (link):**
+  - No link exists with the provided short code
+  - Error message: "Link not found"
+  
+  **NOT_FOUND (file):**
+  - Link exists but the associated file has been deleted from storage
+  - Error message: "File not found"
+  
+  **Access tracking:** Recorded as NOT_FOUND in audit logs.
+</ResponseField>
+
+<ResponseField name="410" type="Gone">
+  Link has been invalidated. Possible causes:
+  
+  **REVOKED:**
+  - Link was manually revoked via DELETE /l/{shortCode}
+  - Error message: "Link has been revoked"
+  
+  **VIEW_LIMIT_REACHED:**
+  - Link has reached its maximum view count
+  - Link is automatically marked as revoked
+  - Error message: "Link has reached its view limit"
+  
+  **EXPIRED:**
+  - Current time is past the link's expiration timestamp
+  - Error message: "Link has expired"
+  
+  **Access tracking:** Failed access attempts are recorded with the specific failure reason.
+</ResponseField>
+
+<ResponseField name="500" type="Internal Server Error">
+  Unexpected server error occurred.
+  
+  **Error response includes:**
+  - `timestamp`: When the error occurred
+  - `status`: HTTP status code (500)
+  - `error`: "Internal Server Error"
+  - `message`: Generic error message with reference ID
+  - `path`: Request path that caused the error
+</ResponseField>
+
+## Validation & Security Checks
+
+The endpoint performs the following checks in order:
+
+1. **Link Existence:** Verify link with short code exists (404 if not)
+2. **Revocation Status:** Check if link has been manually revoked (410 if revoked)
+3. **Password Validation:** If password is set, validate header (401 if missing/wrong)
+4. **View Limit:** Check if maxViews exceeded (410 if limit reached, auto-revokes)
+5. **Expiration:** Check if current time > expiresAt (410 if expired)
+6. **File Existence (downloads only):** Verify file exists on disk (404 if missing)
+7. **Increment View Counter:** Increment current view count for successful access
+8. **Audit Logging:** Record access attempt with result, IP, user agent
+
+## Examples
+
+### Access Basic Redirect Link
+
+<CodeGroup>
+
+```bash cURL (Browser Redirect)
+curl -i http://localhost:8080/l/K2x9pLmN
+```
+
+```bash cURL (JSON Response)
+curl http://localhost:8080/l/K2x9pLmN \
+  -H "Accept: application/json"
+```
+
+```javascript JavaScript (Fetch)
+const response = await fetch('http://localhost:8080/l/K2x9pLmN', {
+  headers: {
+    'Accept': 'application/json'
+  }
+});
+
+const data = await response.json();
+console.log(data.targetUrl);
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'http://localhost:8080/l/K2x9pLmN',
+    headers={'Accept': 'application/json'}
+)
+
+data = response.json()
+print(data['targetUrl'])
+```
+
+</CodeGroup>
+
+**Response (302 Found) - Browser Redirect:**
+
+```http
+HTTP/1.1 302 Found
+Location: https://example.com
+```
+
+**Response (200 OK) - JSON:**
+
+```json
+{
+  "type": "REDIRECT",
+  "targetUrl": "https://example.com"
+}
+```
+
+### Access Password-Protected Link
+
+<CodeGroup>
+
+```bash cURL
+curl -i http://localhost:8080/l/P9qRsTuV \
+  -H "X-Link-Password: SecurePass2024!"
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:8080/l/P9qRsTuV', {
+  headers: {
+    'X-Link-Password': 'SecurePass2024!'
+  },
+  redirect: 'manual'  // Don't auto-follow redirects
+});
+
+console.log(response.status);  // 302
+console.log(response.headers.get('Location'));  // Target URL
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'http://localhost:8080/l/P9qRsTuV',
+    headers={'X-Link-Password': 'SecurePass2024!'},
+    allow_redirects=False
+)
+
+print(response.status_code)  # 302
+print(response.headers['Location'])  # Target URL
+```
+
+</CodeGroup>
+
+**Response (302 Found):**
+
+```http
+HTTP/1.1 302 Found
+Location: https://example.com/confidential-document.pdf
+```
+
+### Download File
+
+<CodeGroup>
+
+```bash cURL
+curl -O -J http://localhost:8080/l/F5gH7jKl
+```
+
+```bash cURL (with password)
+curl -O -J http://localhost:8080/l/A1bC2dEf \
+  -H "X-Link-Password: TopSecret2024!"
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:8080/l/F5gH7jKl');
+const blob = await response.blob();
+
+// Extract filename from Content-Disposition header
+const disposition = response.headers.get('Content-Disposition');
+const filename = disposition.match(/filename="(.+)"/)[1];
+
+// Trigger download
+const url = window.URL.createObjectURL(blob);
+const a = document.createElement('a');
+a.href = url;
+a.download = filename;
+a.click();
+```
+
+```python Python
+import requests
+
+response = requests.get('http://localhost:8080/l/F5gH7jKl')
+
+# Extract filename from Content-Disposition
+disposition = response.headers['Content-Disposition']
+filename = disposition.split('filename="')[1].rstrip('"')
+
+# Save file
+with open(filename, 'wb') as f:
+    f.write(response.content)
+```
+
+</CodeGroup>
+
+**Response (200 OK):**
+
+```http
+HTTP/1.1 200 OK
+Content-Disposition: attachment; filename="document.pdf"
+Content-Type: application/octet-stream
+Content-Length: 245681
+
+<binary file content>
+```
+
+### Error: Link Not Found
+
+**Request:**
+
+```bash
+curl -i http://localhost:8080/l/invalid123
+```
+
+**Response (404 Not Found):**
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00+00:00",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Link not found",
+  "path": "/l/invalid123"
+}
+```
+
+### Error: Password Required
+
+**Request (missing password header):**
+
+```bash
+curl -i http://localhost:8080/l/P9qRsTuV
+```
+
+**Response (401 Unauthorized):**
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00+00:00",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Password required",
+  "path": "/l/P9qRsTuV"
+}
+```
+
+### Error: Invalid Password
+
+**Request (wrong password):**
+
+```bash
+curl -i http://localhost:8080/l/P9qRsTuV \
+  -H "X-Link-Password: WrongPassword"
+```
+
+**Response (401 Unauthorized):**
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00+00:00",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Invalid password",
+  "path": "/l/P9qRsTuV"
+}
+```
+
+### Error: Link Revoked
+
+**Request:**
+
+```bash
+curl -i http://localhost:8080/l/revokedLink
+```
+
+**Response (410 Gone):**
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00+00:00",
+  "status": 410,
+  "error": "Gone",
+  "message": "Link has been revoked",
+  "path": "/l/revokedLink"
+}
+```
+
+### Error: View Limit Reached
+
+**Request (link has reached max views):**
+
+```bash
+curl -i http://localhost:8080/l/limitReached
+```
+
+**Response (410 Gone):**
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00+00:00",
+  "status": 410,
+  "error": "Gone",
+  "message": "Link has reached its view limit",
+  "path": "/l/limitReached"
+}
+```
+
+<Note>
+  When a link reaches its view limit, it is automatically marked as revoked to prevent further access attempts.
+</Note>
+
+### Error: Link Expired
+
+**Request (current time past expiresAt):**
+
+```bash
+curl -i http://localhost:8080/l/expiredLink
+```
+
+**Response (410 Gone):**
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00+00:00",
+  "status": 410,
+  "error": "Gone",
+  "message": "Link has expired",
+  "path": "/l/expiredLink"
+}
+```
+
+## Access Tracking
+
+Every access attempt (successful or failed) is recorded in the audit log with:
+
+- **Short Code:** Link identifier
+- **Access Result:** `SUCCESS`, `NOT_FOUND`, `REVOKED`, `PASSWORD_REQUIRED`, `INVALID_PASSWORD`, `VIEW_LIMIT_REACHED`, `EXPIRED`
+- **IP Address:** Client IP address (from `HttpServletRequest.getRemoteAddr()`)
+- **User Agent:** Client user agent string
+- **Timestamp:** When the access occurred
+
+You can retrieve access statistics via the [Statistics API](/api/stats/overview).
+
+## Important Notes
+
+<Warning>
+  **View Counter:** Successful accesses increment the view count. Once `maxViews` is reached, the link is automatically revoked and returns 410 Gone for subsequent requests.
+</Warning>
+
+<Note>
+  **Password Security:** Passwords are validated using bcrypt comparison. The plaintext password in the `X-Link-Password` header is never stored or logged.
+</Note>
+
+<Note>
+  **IP & User Agent Tracking:** All access attempts capture client IP and user agent for security auditing and analytics purposes.
+</Note>
+
+## Related Endpoints
+
+<CardGroup cols={2}>
+  <Card title="Create Link" icon="link" href="/api/links/create">
+    Create a new secure redirect link
+  </Card>
+  <Card title="Upload Link" icon="upload" href="/api/links/upload">
+    Upload a file and create a download link
+  </Card>
+  <Card title="Revoke Link" icon="ban" href="/api/links/revoke">
+    Manually revoke a secure link
+  </Card>
+  <Card title="Access Statistics" icon="chart-line" href="/api/stats/access-summary">
+    View access patterns and metrics
+  </Card>
+</CardGroup>

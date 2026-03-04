@@ -1,0 +1,214 @@
+---
+title: 'Access Statistics'
+description: 'Track and analyze link access patterns and failures'
+---
+
+## Get Access Summary
+
+<ParamField path="GET" type="endpoint">
+  /api/stats/access/summary
+</ParamField>
+
+Retrieve overall access statistics including total accesses, successful accesses, failures, expirations, and unique origins. This endpoint also calculates efficiency and attrition rates.
+
+### Response
+
+<ResponseField name="total" type="long" required>
+  Total number of access attempts across all links
+</ResponseField>
+
+<ResponseField name="success" type="long" required>
+  Number of successful access attempts
+</ResponseField>
+
+<ResponseField name="failed" type="long" required>
+  Number of failed access attempts
+</ResponseField>
+
+<ResponseField name="expired" type="long" required>
+  Number of attempts to access expired links
+</ResponseField>
+
+<ResponseField name="uniqueOrigins" type="long" required>
+  Number of unique origins that accessed links
+</ResponseField>
+
+<ResponseField name="accessEfficiencyRatio" type="double" required>
+  Percentage of successful accesses (success / total * 100)
+</ResponseField>
+
+<ResponseField name="expirationAttritionRate" type="double" required>
+  Percentage of expired accesses (expired / total * 100)
+</ResponseField>
+
+<ResponseExample>
+```json
+{
+  "total": 1250,
+  "success": 987,
+  "failed": 143,
+  "expired": 120,
+  "uniqueOrigins": 45,
+  "accessEfficiencyRatio": 78.96,
+  "expirationAttritionRate": 9.6
+}
+```
+</ResponseExample>
+
+---
+
+## Get Hourly Access
+
+<ParamField path="GET" type="endpoint">
+  /api/stats/access/hourly
+</ParamField>
+
+Get access counts grouped by hour of day (0-23). Useful for identifying peak usage times.
+
+### Response
+
+Returns an array of hourly access records:
+
+<ResponseField name="hour" type="int" required>
+  Hour of day (0-23)
+</ResponseField>
+
+<ResponseField name="count" type="long" required>
+  Number of accesses during this hour
+</ResponseField>
+
+<ResponseExample>
+```json
+[
+  {
+    "hour": 0,
+    "count": 12
+  },
+  {
+    "hour": 1,
+    "count": 8
+  },
+  {
+    "hour": 2,
+    "count": 5
+  },
+  {
+    "hour": 9,
+    "count": 145
+  },
+  {
+    "hour": 14,
+    "count": 203
+  },
+  {
+    "hour": 23,
+    "count": 18
+  }
+]
+```
+</ResponseExample>
+
+---
+
+## Get Daily Access
+
+<ParamField path="GET" type="endpoint">
+  /api/stats/access/daily
+</ParamField>
+
+Get access counts grouped by date. Track daily trends and patterns over time.
+
+### Response
+
+Returns an array of daily access records:
+
+<ResponseField name="date" type="string" required>
+  Date in ISO 8601 format (YYYY-MM-DD)
+</ResponseField>
+
+<ResponseField name="count" type="long" required>
+  Number of accesses on this date
+</ResponseField>
+
+<ResponseExample>
+```json
+[
+  {
+    "date": "2026-02-28",
+    "count": 234
+  },
+  {
+    "date": "2026-03-01",
+    "count": 198
+  },
+  {
+    "date": "2026-03-02",
+    "count": 267
+  },
+  {
+    "date": "2026-03-03",
+    "count": 312
+  },
+  {
+    "date": "2026-03-04",
+    "count": 189
+  }
+]
+```
+</ResponseExample>
+
+---
+
+## Get Access Failures
+
+<ParamField path="GET" type="endpoint">
+  /api/stats/access/failures
+</ParamField>
+
+Analyze failed access attempts grouped by failure reason. Helps identify common issues users encounter.
+
+### Response
+
+Returns an array of failure records:
+
+<ResponseField name="result" type="enum" required>
+  Type of access failure. Possible values:
+  - `NOT_FOUND` - Link does not exist
+  - `REVOKED` - Link was revoked
+  - `EXPIRED` - Link has expired
+  - `VIEW_LIMIT_REACHED` - Maximum views exceeded
+  - `PASSWORD_REQUIRED` - Password needed but not provided
+  - `INVALID_PASSWORD` - Incorrect password provided
+  - `UNEXPECTED_STATE` - Link in unexpected state
+</ResponseField>
+
+<ResponseField name="count" type="long" required>
+  Number of failures of this type
+</ResponseField>
+
+<ResponseExample>
+```json
+[
+  {
+    "result": "EXPIRED",
+    "count": 87
+  },
+  {
+    "result": "NOT_FOUND",
+    "count": 42
+  },
+  {
+    "result": "INVALID_PASSWORD",
+    "count": 23
+  },
+  {
+    "result": "VIEW_LIMIT_REACHED",
+    "count": 15
+  },
+  {
+    "result": "REVOKED",
+    "count": 8
+  }
+]
+```
+</ResponseExample>

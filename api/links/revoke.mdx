@@ -1,0 +1,332 @@
+---
+title: 'Revoke Link'
+description: 'Permanently disable a secure link to prevent further access'
+---
+
+## Endpoint
+
+<Note>
+  This endpoint permanently revokes a secure link, preventing all future access attempts. Revoked links return HTTP 410 Gone when accessed.
+</Note>
+
+```http
+DELETE /l/{shortCode}
+```
+
+## Path Parameters
+
+<ParamField path="shortCode" type="string" required>
+  The unique 8-character identifier for the secure link to revoke.
+  
+  **Format:** Alphanumeric string (case-sensitive)
+  
+  **Example:** `K2x9pLmN`
+</ParamField>
+
+## Response
+
+<ResponseField name="Status" type="204 No Content">
+  Link successfully revoked. No response body is returned.
+</ResponseField>
+
+## Status Codes
+
+<ResponseField name="204" type="No Content">
+  Link successfully revoked. The link will no longer be accessible.
+  
+  **Behavior:**
+  - Link status is marked as revoked in the database
+  - Future access attempts return 410 Gone
+  - No response body is returned
+  - Idempotent: Already revoked links return 204 without error
+</ResponseField>
+
+<ResponseField name="404" type="Not Found">
+  No link exists with the provided short code.
+  
+  **Error response includes:**
+  - `timestamp`: When the error occurred
+  - `status`: HTTP status code (404)
+  - `error`: "Not Found"
+  - `message`: "Link not found"
+  - `path`: Request path that caused the error
+</ResponseField>
+
+<ResponseField name="500" type="Internal Server Error">
+  Unexpected server error occurred.
+  
+  **Error response includes:**
+  - `timestamp`: When the error occurred
+  - `status`: HTTP status code (500)
+  - `error`: "Internal Server Error"
+  - `message`: Generic error message with reference ID for troubleshooting
+  - `path`: Request path that caused the error
+</ResponseField>
+
+## Behavior Details
+
+### Revocation Process
+
+1. **Link Lookup:** System searches for link by short code
+2. **Not Found Check:** Returns 404 if link doesn't exist
+3. **Revocation Status:** Checks if link is already revoked
+4. **Idempotent Operation:** If already revoked, returns 204 without modifying database
+5. **Mark as Revoked:** If not revoked, sets revocation flag and saves to database
+6. **Success Response:** Returns 204 No Content
+
+### Post-Revocation Effects
+
+Once a link is revoked:
+
+- **Access Attempts:** All future GET /l/{shortCode} requests return 410 Gone
+- **Error Message:** "Link has been revoked"
+- **Audit Logging:** Access attempts are logged with result `REVOKED`
+- **Irreversible:** Revocation cannot be undone (link must be recreated)
+- **Metrics:** Revoked status is reflected in statistics APIs
+
+<Warning>
+  **Irreversible Action:** Link revocation is permanent and cannot be undone. The link will need to be recreated if access should be restored.
+</Warning>
+
+## Examples
+
+### Revoke a Link
+
+<CodeGroup>
+
+```bash cURL
+curl -X DELETE http://localhost:8080/l/K2x9pLmN -i
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:8080/l/K2x9pLmN', {
+  method: 'DELETE'
+});
+
+if (response.status === 204) {
+  console.log('Link successfully revoked');
+}
+```
+
+```python Python
+import requests
+
+response = requests.delete('http://localhost:8080/l/K2x9pLmN')
+
+if response.status_code == 204:
+    print('Link successfully revoked')
+```
+
+</CodeGroup>
+
+**Response (204 No Content):**
+
+```http
+HTTP/1.1 204 No Content
+```
+
+<Note>
+  No response body is returned for successful revocation (204 status).
+</Note>
+
+### Revoke Already Revoked Link (Idempotent)
+
+**Request:**
+
+```bash
+curl -X DELETE http://localhost:8080/l/alreadyRevoked -i
+```
+
+**Response (204 No Content):**
+
+```http
+HTTP/1.1 204 No Content
+```
+
+<Note>
+  Revoking an already revoked link returns 204 without error. The operation is idempotent and safe to retry.
+</Note>
+
+### Error: Link Not Found
+
+**Request:**
+
+```bash
+curl -X DELETE http://localhost:8080/l/nonexistent -i
+```
+
+**Response (404 Not Found):**
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00+00:00",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Link not found",
+  "path": "/l/nonexistent"
+}
+```
+
+### Access Revoked Link (After Revocation)
+
+**First, revoke the link:**
+
+```bash
+curl -X DELETE http://localhost:8080/l/K2x9pLmN
+```
+
+**Then attempt to access it:**
+
+```bash
+curl -i http://localhost:8080/l/K2x9pLmN
+```
+
+**Response (410 Gone):**
+
+```json
+{
+  "timestamp": "2026-03-04T14:35:00+00:00",
+  "status": 410,
+  "error": "Gone",
+  "message": "Link has been revoked",
+  "path": "/l/K2x9pLmN"
+}
+```
+
+## Use Cases
+
+### Security Incident Response
+
+Revoke links immediately when:
+- Suspicious access patterns are detected
+- Link has been shared with unauthorized parties
+- Content is no longer safe to distribute
+- Compliance requirements mandate content removal
+
+```bash
+# Emergency revocation
+curl -X DELETE http://localhost:8080/l/compromisedLink
+```
+
+### Content Management
+
+Revoke links when:
+- Content has been updated and old link should not work
+- Promotional period has ended
+- User requests link deletion
+- Link was created by mistake
+
+```bash
+# Remove outdated promotional link
+curl -X DELETE http://localhost:8080/l/oldPromoLink
+```
+
+### Cleanup Operations
+
+Batch revoke multiple links:
+
+```bash
+# Revoke multiple links
+for code in K2x9pLmN A7bCdEfG X1yZ2aBc; do
+  curl -X DELETE http://localhost:8080/l/$code
+  echo "Revoked: $code"
+done
+```
+
+```python
+# Python batch revocation
+import requests
+
+short_codes = ['K2x9pLmN', 'A7bCdEfG', 'X1yZ2aBc']
+
+for code in short_codes:
+    response = requests.delete(f'http://localhost:8080/l/{code}')
+    if response.status_code == 204:
+        print(f'Revoked: {code}')
+    elif response.status_code == 404:
+        print(f'Not found: {code}')
+```
+
+## Automatic Revocation
+
+Links can also be automatically revoked by the system in certain conditions:
+
+### View Limit Reached
+
+When a link reaches its `maxViews` limit:
+- System automatically marks link as revoked
+- Next access attempt returns 410 Gone with message "Link has reached its view limit"
+- No manual revocation needed
+
+**Example scenario:**
+```bash
+# Link created with maxViews=3
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{"targetUrl": "https://example.com", "maxViews": 3}'
+
+# After 3 successful accesses, 4th attempt returns:
+# 410 Gone - "Link has reached its view limit"
+# Link is now automatically revoked
+```
+
+<Note>
+  View limit auto-revocation happens **during** the access attempt that exceeds the limit, not before. The limiting access still fails with 410 Gone.
+</Note>
+
+### Scheduled Expiration
+
+Expired links (where `expiresAt` < current time):
+- Are **not** automatically marked as revoked in the database
+- Return 410 Gone when accessed, but revocation flag remains false
+- Can still be manually revoked via DELETE endpoint
+- Periodic cleanup jobs may revoke or delete expired links
+
+## Monitoring Revocations
+
+Track revoked links via the Statistics API:
+
+```bash
+# Get link status statistics (includes revoked count)
+curl http://localhost:8080/api/stats/link-status
+
+# Get access attempts to revoked links
+curl http://localhost:8080/api/stats/access/by-result
+```
+
+See [Statistics API](/api/stats/overview) for detailed metrics on revoked links and access patterns.
+
+## Important Notes
+
+<Warning>
+  **Permanent Action:** Revocation is irreversible. Once revoked, a link cannot be un-revoked. You must create a new link to restore access.
+</Warning>
+
+<Note>
+  **Idempotent:** Calling DELETE on an already revoked link returns 204 (success) without error. This makes it safe to retry revocation operations.
+</Note>
+
+<Note>
+  **No Authentication:** This endpoint does not require authentication. Anyone with knowledge of the short code can revoke a link. Consider implementing authentication in production environments.
+</Note>
+
+<Note>
+  **File Cleanup:** Revoking a file download link does not delete the uploaded file from storage. Implement separate cleanup processes to remove files for revoked/expired links.
+</Note>
+
+## Related Endpoints
+
+<CardGroup cols={2}>
+  <Card title="Create Link" icon="link" href="/api/links/create">
+    Create a new secure redirect link
+  </Card>
+  <Card title="Upload Link" icon="upload" href="/api/links/upload">
+    Upload a file and create a download link
+  </Card>
+  <Card title="Resolve Link" icon="arrow-right" href="/api/links/resolve">
+    Access a secure link (will fail for revoked links)
+  </Card>
+  <Card title="Link Statistics" icon="chart-bar" href="/api/stats/overview">
+    View metrics including revocation data
+  </Card>
+</CardGroup>

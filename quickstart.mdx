@@ -1,80 +1,382 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get up and running with Secure Link API in minutes
+icon: rocket
 ---
 
-## Get started in three steps
+## Overview
 
-Get your documentation site running locally and make your first customization.
+Secure Link API is a Java Spring Boot application that creates secure, expiring links with password protection and access limits. This quickstart will guide you through installation, creating your first link, and accessing statistics.
 
-### Step 1: Set up your local environment
+## Prerequisites
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+Before you begin, ensure you have the following installed:
+
+- **Java 21+** - Required for Spring Boot 4.0.2
+- **Maven** - For building and running the application
+- **MySQL 8.4+** - For production/dev database
+- **Git** - For cloning the repository
+
+## Installation
+
+<Steps>
+  <Step title="Clone the repository">
+    Clone the Secure Link API repository from GitHub:
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    ```bash
+    git clone https://github.com/WalysonGomes/secure-link-api.git
+    cd secure-link-api/backend
+    ```
+  </Step>
+  
+  <Step title="Configure the database">
+    Set up your MySQL database and configure the connection. Create a `.env` file or set environment variables:
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    ```bash
+    export DB_HOST=localhost
+    export DB_PORT=3306
+    export DB_NAME=secure_link
+    export DB_USERNAME=your_user
+    export DB_PASSWORD=your_password
+    ```
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    <Note>
+    The application uses Flyway for database migrations, so tables will be created automatically on first run.
+    </Note>
+  </Step>
+  
+  <Step title="Start the server">
+    Run the application using Maven with the dev profile:
+    
+    ```bash
+    SPRING_PROFILES_ACTIVE=dev mvn spring-boot:run
+    ```
+    
+    The API will start on `http://localhost:8080`
+  </Step>
+  
+  <Step title="Verify installation">
+    Check that the API is running by accessing the health endpoint:
+    
+    ```bash
+    curl http://localhost:8080/actuator/health
+    ```
+    
+    <Accordion title="Expected Response">
+    ```json
+    {
+      "status": "UP",
+      "components": {
+        "db": { "status": "UP" },
+        "diskSpace": { "status": "UP" },
+        "ping": { "status": "UP" }
+      }
+    }
+    ```
+    </Accordion>
+  </Step>
+</Steps>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+## Creating Your First Link
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+### URL Shortener
 
-### Step 3: Go live
+Create a secure link that redirects to an external URL:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+<CodeGroup>
 
-## Next steps
+```bash cURL
+curl -X POST http://localhost:8080/api/links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetUrl": "https://example.com/document.pdf",
+    "expiresAt": "2026-12-31T23:59:59Z",
+    "maxViews": 10,
+    "password": "secret123"
+  }'
+```
 
-Now that you have your docs running, explore these key features:
+```javascript JavaScript
+const response = await fetch('http://localhost:8080/api/links', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    targetUrl: 'https://example.com/document.pdf',
+    expiresAt: '2026-12-31T23:59:59Z',
+    maxViews: 10,
+    password: 'secret123'
+  })
+});
+
+const data = await response.json();
+console.log(data);
+```
+
+```python Python
+import requests
+
+response = requests.post('http://localhost:8080/api/links', json={
+    'targetUrl': 'https://example.com/document.pdf',
+    'expiresAt': '2026-12-31T23:59:59Z',
+    'maxViews': 10,
+    'password': 'secret123'
+})
+
+print(response.json())
+```
+
+</CodeGroup>
+
+**Response:**
+
+```json
+{
+  "shortCode": "K2x9pLmN",
+  "accessUrl": "http://localhost:8080/l/K2x9pLmN",
+  "expiresAt": "2026-12-31T23:59:59Z",
+  "maxViews": 10
+}
+```
+
+### File Upload
+
+Upload a file and generate a secure download link:
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8080/api/links/upload \
+  -F "file=@/path/to/document.pdf" \
+  -F "maxViews=5" \
+  -F "password=secure_file"
+```
+
+```javascript JavaScript
+const formData = new FormData();
+formData.append('file', fileInput.files[0]);
+formData.append('maxViews', '5');
+formData.append('password', 'secure_file');
+
+const response = await fetch('http://localhost:8080/api/links/upload', {
+  method: 'POST',
+  body: formData
+});
+
+const data = await response.json();
+```
+
+```python Python
+files = {'file': open('/path/to/document.pdf', 'rb')}
+data = {'maxViews': 5, 'password': 'secure_file'}
+
+response = requests.post(
+    'http://localhost:8080/api/links/upload',
+    files=files,
+    data=data
+)
+```
+
+</CodeGroup>
+
+## Accessing Secure Links
+
+### Public Links
+
+Access a link without password protection:
+
+```bash
+curl -i http://localhost:8080/l/K2x9pLmN
+```
+
+**Response:** HTTP 302 redirect to the target URL
+
+### Password-Protected Links
+
+For links with password protection, provide the password in the `X-Link-Password` header:
+
+```bash
+curl -i http://localhost:8080/l/K2x9pLmN \
+  -H "X-Link-Password: secret123"
+```
+
+### Response Codes
+
+| Status | Result | Description |
+|--------|--------|-------------|
+| 302 | Redirect | Link is valid, redirecting to target URL |
+| 200 | Download | File download initiated |
+| 401 | Password Required | Link requires password authentication |
+| 404 | Not Found | Link does not exist |
+| 410 | Gone | Link expired, revoked, or view limit reached |
+
+## Viewing Statistics
+
+### Access Summary
+
+Get overall access statistics with efficiency metrics:
+
+```bash
+curl http://localhost:8080/api/stats/access/summary
+```
+
+**Response:**
+
+```json
+{
+  "total": 1250,
+  "success": 1050,
+  "failed": 200,
+  "expired": 45,
+  "uniqueOrigins": 320,
+  "accessEfficiencyRatio": 84.0,
+  "expirationAttritionRate": 3.6
+}
+```
+
+### Link Status
+
+Check the status of all links in the system:
+
+```bash
+curl http://localhost:8080/api/stats/links
+```
+
+**Response:**
+
+```json
+{
+  "active": 42,
+  "expired": 18,
+  "revoked": 7
+}
+```
+
+### Top Accessed Links
+
+View the most frequently accessed links:
+
+```bash
+curl http://localhost:8080/api/stats/links/top?limit=5
+```
+
+### Hourly Access Distribution
+
+Analyze access patterns by hour:
+
+```bash
+curl http://localhost:8080/api/stats/access/hourly
+```
+
+**Response:**
+
+```json
+[
+  { "hour": 14, "count": 150 },
+  { "hour": 15, "count": 230 },
+  { "hour": 16, "count": 180 }
+]
+```
+
+## Revoking Links
+
+Manually revoke a link to make it immediately inaccessible:
+
+```bash
+curl -X DELETE http://localhost:8080/l/K2x9pLmN
+```
+
+**Response:** HTTP 204 No Content
+
+## Configuration Options
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DB_HOST` | MySQL database host | localhost |
+| `DB_PORT` | MySQL database port | 3306 |
+| `DB_NAME` | Database name | secure_link |
+| `DB_USERNAME` | Database username | root |
+| `DB_PASSWORD` | Database password | - |
+| `SPRING_PROFILES_ACTIVE` | Active Spring profile (dev/prod/test) | dev |
+| `SERVER_PORT` | HTTP server port | 8080 |
+
+### Application Properties
+
+Key configuration options in `application.properties`:
+
+```properties
+# Default TTL for links without expiration (24 hours)
+secure-link.default-ttl=24h
+
+# Maximum file upload size
+spring.servlet.multipart.max-file-size=50MB
+spring.servlet.multipart.max-request-size=50MB
+
+# File storage location
+secure-link.storage.location=./uploads
+
+# Base URL for generated links
+secure-link.base-url=http://localhost:8080
+```
+
+## Next Steps
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Core Concepts" icon="book-open" href="/concepts/secure-links">
+    Learn about link types, lifecycle, and validation
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore the complete API documentation
+  </Card>
+  
+  <Card title="Authentication" icon="lock" href="/api/authentication">
+    Learn about API security and authentication
+  </Card>
+  
+  <Card title="Monitoring" icon="chart-line" href="/operations/metrics">
+    Set up Prometheus metrics and health checks
+  </Card>
+  
+  <Card title="Deployment" icon="rocket" href="/operations/docker">
+    Deploy to production environments
+  </Card>
+  
+  <Card title="Access Control" icon="shield-check" href="/concepts/access-control">
+    Understand expiration, limits, and password protection
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Troubleshooting
+
+### Database Connection Issues
+
+If you encounter database connection errors:
+
+1. Verify MySQL is running: `mysql -u root -p`
+2. Check credentials in environment variables
+3. Ensure database exists: `CREATE DATABASE secure_link;`
+4. Verify MySQL version is 8.4+
+
+### File Upload Failures
+
+If file uploads fail:
+
+1. Check file size is under 50MB
+2. Verify storage directory exists and is writable
+3. Check disk space: `df -h`
+
+### Authentication Errors
+
+If password-protected links fail:
+
+1. Ensure password is sent in `X-Link-Password` header (not in body or query params)
+2. Verify password matches the one used during link creation
+3. Check for typos in the header name
+
+## Support
+
+- **GitHub Repository**: [WalysonGomes/secure-link-api](https://github.com/WalysonGomes/secure-link-api)
+- **Issues**: Report bugs and feature requests on GitHub
+- **Documentation**: Full API reference and guides available in this documentation site

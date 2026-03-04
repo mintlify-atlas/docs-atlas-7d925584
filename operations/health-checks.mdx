@@ -1,0 +1,276 @@
+---
+title: 'Health Checks'
+description: 'Spring Boot Actuator health endpoints and custom health indicators for monitoring system components'
+---
+
+## Overview
+
+Secure Link API provides comprehensive health monitoring through Spring Boot Actuator. The application implements custom health indicators for critical components including the database, file storage, and background schedulers.
+
+## Health Endpoint
+
+The main health endpoint is exposed via Spring Actuator:
+
+```
+GET /actuator/health
+```
+
+<ResponseField name="status" type="string">
+  Overall application health status: `UP`, `DOWN`, or `OUT_OF_SERVICE`
+</ResponseField>
+
+<ResponseField name="components" type="object">
+  Health status of individual components
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "status": "UP",
+  "components": {
+    "database": {
+      "status": "UP",
+      "details": {
+        "database": "reachable",
+        "checkedAt": "2026-03-04T14:30:00Z"
+      }
+    },
+    "storage": {
+      "status": "UP"
+    },
+    "scheduler": {
+      "status": "UP",
+      "details": {
+        "scheduler": "running",
+        "lastExecution": "2026-03-04T14:29:30Z"
+      }
+    }
+  }
+}
+```
+
+## Health Indicators
+
+### Database Health
+
+Monitors database connectivity by executing a simple query.
+
+**Implementation:** `br.com.walyson.secure_link.health.DatabaseHealthIndicator:19`
+
+```java
+public Health health() {
+  try {
+    Integer result = jdbcTemplate.queryForObject("SELECT 1", Integer.class);
+    
+    if (result != null && result == 1) {
+      return Health.up()
+        .withDetail("database", "reachable")
+        .withDetail("checkedAt", Instant.now())
+        .build();
+    }
+    
+    return Health.down()
+      .withDetail("database", "unexpected response")
+      .build();
+      
+  } catch (Exception e) {
+    return Health.down()
+      .withDetail("database", "unreachable")
+      .withException(e)
+      .build();
+  }
+}
+```
+
+**Status Values:**
+- `UP` - Database is reachable and responding correctly
+- `DOWN` - Database is unreachable or returning unexpected results
+
+**Details Provided:**
+- `database` - Connection status description
+- `checkedAt` - Timestamp of the last successful check
+
+---
+
+### Storage Health
+
+Verifies that the file storage path exists and is writable.
+
+**Implementation:** `br.com.walyson.secure_link.health.StorageHealthIndicator:18`
+
+```java
+public Health health() {
+  try {
+    Path path = Path.of(storagePath);
+    if (Files.exists(path) && Files.isWritable(path)) {
+      return Health.up().build();
+    }
+    return Health.down().withDetail("storage", "Not writable").build();
+  } catch (Exception e) {
+    return Health.down(e).build();
+  }
+}
+```
+
+**Status Values:**
+- `UP` - Storage path exists and is writable
+- `DOWN` - Storage path doesn't exist, is not writable, or an error occurred
+
+**Configuration:**
+The storage path is configured via `app.storage.path` property (default: `/tmp/uploads/`)
+
+---
+
+### Scheduler Health
+
+Monitors the background link expiration scheduler to ensure it's running on schedule.
+
+**Implementation:** `br.com.walyson.secure_link.health.SchedulerHealthIndicator:21`
+
+```java
+public Health health() {
+  Instant lastExecution = registry.getLastExecution();
+  
+  if (lastExecution == null) {
+    return Health.outOfService()
+      .withDetail("scheduler", "never executed")
+      .build();
+  }
+  
+  Duration delay = Duration.between(lastExecution, Instant.now());
+  
+  if (delay.compareTo(MAX_DELAY) > 0) {
+    return Health.outOfService()
+      .withDetail("scheduler", "execution delayed")
+      .withDetail("lastExecution", lastExecution)
+      .withDetail("delaySeconds", delay.getSeconds())
+      .build();
+  }
+  
+  return Health.up()
+    .withDetail("scheduler", "running")
+    .withDetail("lastExecution", lastExecution)
+    .build();
+}
+```
+
+**Status Values:**
+- `UP` - Scheduler executed recently (within 2 minutes)
+- `OUT_OF_SERVICE` - Scheduler has never run or hasn't executed within the expected timeframe
+
+**Details Provided:**
+- `scheduler` - Status description
+- `lastExecution` - Timestamp of the last scheduler execution
+- `delaySeconds` - Delay in seconds (only when delayed)
+
+**Threshold:** Maximum acceptable delay is 2 minutes
+
+---
+
+## Configuration
+
+### Enabling Health Endpoints
+
+Health endpoints are enabled by including the Spring Boot Actuator dependency:
+
+```xml
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-actuator</artifactId>
+</dependency>
+```
+
+### Exposing Health Details
+
+To expose detailed health information in production, configure:
+
+```properties
+management.endpoint.health.show-details=always
+management.endpoint.health.show-components=always
+```
+
+<Note>
+  For security reasons, consider restricting detailed health information to authenticated users or internal networks in production environments.
+</Note>
+
+### Health Check Groups
+
+You can create custom health groups for different purposes:
+
+```properties
+management.endpoint.health.group.liveness.include=database
+management.endpoint.health.group.readiness.include=database,storage,scheduler
+```
+
+Access groups via:
+- `/actuator/health/liveness`
+- `/actuator/health/readiness`
+
+## Kubernetes Integration
+
+Use health endpoints for Kubernetes probes:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /actuator/health/liveness
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /actuator/health/readiness
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 5
+```
+
+## Monitoring Best Practices
+
+1. **Regular Polling** - Configure your monitoring system to poll the health endpoint every 30-60 seconds
+2. **Alert on Status Changes** - Set up alerts when component status changes from `UP` to `DOWN` or `OUT_OF_SERVICE`
+3. **Track Health History** - Log health check results for trend analysis
+4. **Component Dependencies** - The overall status is `DOWN` if any critical component is unhealthy
+
+<Note>
+  The scheduler health indicator uses a `SchedulerExecutionRegistry` component that tracks execution timestamps. Ensure your scheduled tasks call `registry.markExecution()` after each successful run.
+</Note>
+
+## Troubleshooting
+
+### Database Health Failures
+
+**Symptoms:** Database component shows `DOWN` status
+
+**Possible Causes:**
+- Database server is unreachable
+- Connection pool exhausted
+- Network connectivity issues
+- Incorrect database credentials
+
+**Resolution:** Check database logs, verify connectivity, and review connection pool configuration
+
+### Storage Health Failures
+
+**Symptoms:** Storage component shows `DOWN` status
+
+**Possible Causes:**
+- Storage path doesn't exist
+- Insufficient permissions
+- Disk full
+- Path configuration incorrect
+
+**Resolution:** Verify the path in `app.storage.path` exists and has write permissions
+
+### Scheduler Health Failures
+
+**Symptoms:** Scheduler component shows `OUT_OF_SERVICE` status
+
+**Possible Causes:**
+- Scheduler thread crashed or stopped
+- Application restarted recently and scheduler hasn't run yet
+- Scheduler disabled or misconfigured
+
+**Resolution:** Check application logs for scheduler errors, verify cron expressions, and ensure the scheduler is enabled

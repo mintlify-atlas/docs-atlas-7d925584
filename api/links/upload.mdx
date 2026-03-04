@@ -1,0 +1,405 @@
+---
+title: 'Upload File Link'
+description: 'Upload a file and generate a secure download link with expiration and access controls'
+---
+
+## Endpoint
+
+<Note>
+  This endpoint accepts file uploads and creates a secure download link with optional expiration, view limits, and password protection.
+</Note>
+
+```http
+POST /api/links/upload
+```
+
+## Content Type
+
+```
+Content-Type: multipart/form-data
+```
+
+<Warning>
+  This endpoint uses `multipart/form-data` encoding, not JSON. Make sure your client sets the correct Content-Type header or lets the browser/HTTP client handle it automatically.
+</Warning>
+
+## Form Parameters
+
+<ParamField body="file" type="file" required>
+  The file to upload. This becomes the download target for the secure link.
+  
+  **Validation:**
+  - Required field
+  - Must be a valid file upload
+  - File is stored on the server filesystem
+  
+  **Storage:**
+  - Files are stored with unique identifiers
+  - Original filename is preserved in metadata
+  - File path is used as the link target
+</ParamField>
+
+<ParamField body="expiresAt" type="string">
+  ISO 8601 timestamp indicating when the download link should expire.
+  
+  **Validation:**
+  - Must be a future date/time
+  - Format: `YYYY-MM-DDTHH:mm:ss±HH:mm` (ISO 8601 with timezone)
+  - If not provided, the link will not have time-based expiration
+  
+  **Example:** `2026-12-31T23:59:59+00:00`
+</ParamField>
+
+<ParamField body="maxViews" type="integer">
+  Maximum number of times the file can be downloaded before the link becomes invalid.
+  
+  **Validation:**
+  - Must be a positive integer (> 0)
+  - If not provided, the link will not have view-based expiration
+  
+  **Example:** `10`
+</ParamField>
+
+<ParamField body="password" type="string">
+  Optional password required to download the file. When set, clients must provide this password via the `X-Link-Password` header when accessing the download link.
+  
+  **Security:**
+  - Stored as a bcrypt hash
+  - Required via HTTP header on file download
+  - No length restrictions (recommended: 8+ characters)
+  
+  **Example:** `filePassword123`
+</ParamField>
+
+## Response
+
+<ResponseField name="shortCode" type="string">
+  Unique identifier for the created download link. This code is used in the access URL.
+  
+  **Format:** 8-character alphanumeric string
+  
+  **Example:** `F5gH7jKl`
+</ResponseField>
+
+<ResponseField name="accessUrl" type="string">
+  The full URL path to download the file.
+  
+  **Format:** `/l/{shortCode}`
+  
+  **Example:** `http://localhost:8080/l/F5gH7jKl`
+</ResponseField>
+
+<ResponseField name="expiresAt" type="string">
+  ISO 8601 timestamp when the download link expires (if expiration was set).
+  
+  **Format:** `YYYY-MM-DDTHH:mm:ss±HH:mm`
+  
+  **Example:** `2026-12-31T23:59:59+00:00`
+</ResponseField>
+
+<ResponseField name="maxViews" type="integer">
+  Maximum number of downloads allowed (if view limit was set).
+  
+  **Example:** `10`
+</ResponseField>
+
+## Status Codes
+
+<ResponseField name="201" type="Created">
+  File uploaded successfully and download link created. Response body contains the link details.
+</ResponseField>
+
+<ResponseField name="400" type="Bad Request">
+  Request validation failed. Possible causes:
+  - Missing or invalid file upload
+  - `expiresAt` is not a future date
+  - `maxViews` is not a positive integer
+  - Invalid multipart/form-data format
+  
+  **Error response includes:**
+  - `timestamp`: When the error occurred
+  - `status`: HTTP status code (400)
+  - `error`: "Bad Request"
+  - `message`: Specific validation error
+  - `path`: Request path that caused the error
+</ResponseField>
+
+<ResponseField name="500" type="Internal Server Error">
+  Unexpected server error occurred (e.g., file storage failure).
+  
+  **Error response includes:**
+  - `timestamp`: When the error occurred
+  - `status`: HTTP status code (500)
+  - `error`: "Internal Server Error"
+  - `message`: Generic error message with reference ID for troubleshooting
+  - `path`: Request path that caused the error
+</ResponseField>
+
+## Examples
+
+### Basic File Upload
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8080/api/links/upload \
+  -F "file=@/path/to/document.pdf"
+```
+
+```javascript JavaScript
+const formData = new FormData();
+formData.append('file', fileInput.files[0]);
+
+const response = await fetch('http://localhost:8080/api/links/upload', {
+  method: 'POST',
+  body: formData
+});
+
+const link = await response.json();
+console.log(link.accessUrl);
+```
+
+```python Python
+import requests
+
+with open('/path/to/document.pdf', 'rb') as f:
+    files = {'file': f}
+    response = requests.post(
+        'http://localhost:8080/api/links/upload',
+        files=files
+    )
+
+link = response.json()
+print(link['accessUrl'])
+```
+
+</CodeGroup>
+
+**Response (201 Created):**
+
+```json
+{
+  "shortCode": "F5gH7jKl",
+  "accessUrl": "http://localhost:8080/l/F5gH7jKl",
+  "expiresAt": null,
+  "maxViews": null
+}
+```
+
+### Upload with Expiration
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8080/api/links/upload \
+  -F "file=@/path/to/report.xlsx" \
+  -F "expiresAt=2026-12-31T23:59:59+00:00"
+```
+
+```javascript JavaScript
+const formData = new FormData();
+formData.append('file', fileInput.files[0]);
+formData.append('expiresAt', '2026-12-31T23:59:59+00:00');
+
+const response = await fetch('http://localhost:8080/api/links/upload', {
+  method: 'POST',
+  body: formData
+});
+```
+
+```python Python
+from datetime import datetime, timezone
+
+expiration = datetime(2026, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+
+with open('/path/to/report.xlsx', 'rb') as f:
+    files = {'file': f}
+    data = {'expiresAt': expiration.isoformat()}
+    response = requests.post(
+        'http://localhost:8080/api/links/upload',
+        files=files,
+        data=data
+    )
+```
+
+</CodeGroup>
+
+**Response (201 Created):**
+
+```json
+{
+  "shortCode": "M8nOpQrS",
+  "accessUrl": "http://localhost:8080/l/M8nOpQrS",
+  "expiresAt": "2026-12-31T23:59:59+00:00",
+  "maxViews": null
+}
+```
+
+### Upload with Download Limit
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8080/api/links/upload \
+  -F "file=@/path/to/presentation.pptx" \
+  -F "maxViews=5"
+```
+
+```javascript JavaScript
+const formData = new FormData();
+formData.append('file', fileInput.files[0]);
+formData.append('maxViews', '5');
+
+const response = await fetch('http://localhost:8080/api/links/upload', {
+  method: 'POST',
+  body: formData
+});
+```
+
+```python Python
+with open('/path/to/presentation.pptx', 'rb') as f:
+    files = {'file': f}
+    data = {'maxViews': 5}
+    response = requests.post(
+        'http://localhost:8080/api/links/upload',
+        files=files,
+        data=data
+    )
+```
+
+</CodeGroup>
+
+**Response (201 Created):**
+
+```json
+{
+  "shortCode": "T3uVwXyZ",
+  "accessUrl": "http://localhost:8080/l/T3uVwXyZ",
+  "expiresAt": null,
+  "maxViews": 5
+}
+```
+
+### Fully Protected Upload
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8080/api/links/upload \
+  -F "file=@/path/to/confidential.zip" \
+  -F "expiresAt=2026-06-30T12:00:00+00:00" \
+  -F "maxViews=3" \
+  -F "password=TopSecret2024!"
+```
+
+```javascript JavaScript
+const formData = new FormData();
+formData.append('file', fileInput.files[0]);
+formData.append('expiresAt', '2026-06-30T12:00:00+00:00');
+formData.append('maxViews', '3');
+formData.append('password', 'TopSecret2024!');
+
+const response = await fetch('http://localhost:8080/api/links/upload', {
+  method: 'POST',
+  body: formData
+});
+```
+
+```python Python
+with open('/path/to/confidential.zip', 'rb') as f:
+    files = {'file': f}
+    data = {
+        'expiresAt': '2026-06-30T12:00:00+00:00',
+        'maxViews': 3,
+        'password': 'TopSecret2024!'
+    }
+    response = requests.post(
+        'http://localhost:8080/api/links/upload',
+        files=files,
+        data=data
+    )
+```
+
+</CodeGroup>
+
+**Response (201 Created):**
+
+```json
+{
+  "shortCode": "A1bC2dEf",
+  "accessUrl": "http://localhost:8080/l/A1bC2dEf",
+  "expiresAt": "2026-06-30T12:00:00+00:00",
+  "maxViews": 3
+}
+```
+
+<Note>
+  The password is not returned in the response. Users must provide it via the `X-Link-Password` header when downloading the file.
+</Note>
+
+### Accessing the Uploaded File
+
+Once uploaded, users can download the file by accessing the `accessUrl` (see [Resolve Link](/api/links/resolve)):
+
+```bash
+# Without password
+curl -O -J http://localhost:8080/l/F5gH7jKl
+
+# With password protection
+curl -O -J http://localhost:8080/l/A1bC2dEf \
+  -H "X-Link-Password: TopSecret2024!"
+```
+
+The response includes:
+- File download with original filename
+- `Content-Disposition: attachment; filename="original-name.pdf"`
+- `Content-Type: application/octet-stream`
+
+### Validation Error Example
+
+**Request without file:**
+
+```bash
+curl -X POST http://localhost:8080/api/links/upload \
+  -F "maxViews=5"
+```
+
+**Response (400 Bad Request):**
+
+```json
+{
+  "timestamp": "2026-03-04T14:30:00+00:00",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "file: must not be null",
+  "path": "/api/links/upload"
+}
+```
+
+## Important Notes
+
+<Warning>
+  **File Storage:** Uploaded files are stored on the server filesystem. Ensure adequate disk space and implement cleanup strategies for expired or revoked links.
+</Warning>
+
+<Note>
+  **Link Type:** Upload links create `DOWNLOAD` type secure links (as opposed to `REDIRECT` type). When accessed, they return the file content instead of redirecting.
+</Note>
+
+<Note>
+  **Original Filename:** The original filename is preserved and returned in the `Content-Disposition` header when the file is downloaded.
+</Note>
+
+## Related Endpoints
+
+<CardGroup cols={2}>
+  <Card title="Create Link" icon="link" href="/api/links/create">
+    Create a redirect link to an external URL
+  </Card>
+  <Card title="Resolve Link" icon="download" href="/api/links/resolve">
+    Download a file using its short code
+  </Card>
+  <Card title="Revoke Link" icon="ban" href="/api/links/revoke">
+    Permanently disable a download link
+  </Card>
+</CardGroup>

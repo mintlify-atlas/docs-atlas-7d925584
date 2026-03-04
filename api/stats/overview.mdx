@@ -1,0 +1,64 @@
+---
+title: 'Statistics API Overview'
+description: 'Access comprehensive statistics and analytics for your secure links'
+---
+
+The Statistics API provides detailed analytics about link access, security events, and link status. Use these endpoints to monitor usage patterns, track security incidents, and analyze link performance.
+
+## Available Endpoints
+
+### Access Statistics
+
+Monitor and analyze link access patterns:
+
+- **[Access Summary](/api/stats/access-summary#get-access-summary)** - Get overall access statistics including success, failure, and expiration metrics
+- **[Hourly Access](/api/stats/access-summary#get-hourly-access)** - View access patterns broken down by hour of day
+- **[Daily Access](/api/stats/access-summary#get-daily-access)** - Track daily access trends over time
+- **[Access Failures](/api/stats/access-summary#get-access-failures)** - Analyze failed access attempts by failure type
+
+### Security Metrics
+
+Track security events and link performance:
+
+- **[Security Exceptions](/api/stats/security-metrics#get-security-exceptions)** - View links with the most security violations
+- **[Link Status Statistics](/api/stats/security-metrics#get-link-status-statistics)** - Get counts of active, expired, and revoked links
+- **[Top Links](/api/stats/security-metrics#get-top-links)** - Find the most accessed links
+
+## Use Cases
+
+### Dashboard Analytics
+
+Combine multiple statistics endpoints to build comprehensive dashboards:
+
+```javascript
+const [summary, hourly, linkStats] = await Promise.all([
+  fetch('/api/stats/access/summary'),
+  fetch('/api/stats/access/hourly'),
+  fetch('/api/stats/links')
+]);
+```
+
+### Security Monitoring
+
+Track potential security issues:
+
+```javascript
+const securityData = await fetch('/api/stats/security/exceptions?limit=10');
+const failures = await fetch('/api/stats/access/failures');
+```
+
+### Performance Analysis
+
+Identify your most popular links:
+
+```javascript
+const topLinks = await fetch('/api/stats/links/top?limit=10');
+```
+
+## Response Format
+
+All statistics endpoints return JSON responses with relevant metrics. Numeric counts are returned as `long` integers, and percentages are calculated as doubles when applicable.
+
+## Rate Limiting
+
+Statistics endpoints follow the same rate limiting rules as other API endpoints. See the [Authentication](/api/authentication) page for details.
